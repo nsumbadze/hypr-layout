@@ -318,6 +318,9 @@ func (m tuiModel) advanceModeSelect() (tuiModel, tea.Cmd) {
 		m.list = m.makeModeList(mon, modes)
 		return m, nil
 	}
+	// Build configs now so the live preview has data on first arrival,
+	// not only after the user has confirmed a direction once.
+	m.activeConfigs = buildActiveMonitorConfigs(m.monitors, m.activeIndexes, m.selectedModes)
 	m.state = tuiDirectionSelect
 	m.list = m.makeDirectionList()
 	return m, nil
