@@ -72,7 +72,7 @@ func parseLayoutSelection(input string, options []layoutOption) (layoutOption, e
 	return layoutOption{}, fmt.Errorf("enter a number between 1 and %d", len(options))
 }
 
-func buildPreviewConfig(monitors []monitor, layoutID int) ([]string, error) {
+func activeIndexesForLayout(monitors []monitor, layoutID int) ([]int, error) {
 	switch layoutID {
 	case 1:
 		return buildLaptopOnly(monitors)
@@ -87,31 +87,31 @@ func buildPreviewConfig(monitors []monitor, layoutID int) ([]string, error) {
 	}
 }
 
-func buildLaptopOnly(monitors []monitor) ([]string, error) {
+func buildLaptopOnly(monitors []monitor) ([]int, error) {
 	laptopIndex := findLaptopMonitorIndex(monitors)
 	if laptopIndex < 0 {
 		return nil, fmt.Errorf("no laptop display detected")
 	}
 
-	return renderConfigLines(monitors, []int{laptopIndex}), nil
+	return []int{laptopIndex}, nil
 }
 
-func buildExternalOnly(monitors []monitor) ([]string, error) {
+func buildExternalOnly(monitors []monitor) ([]int, error) {
 	activeIndexes := pickPreferredMonitorIndexes(monitors, 1, true)
 	if len(activeIndexes) == 0 {
 		return nil, fmt.Errorf("no external display detected")
 	}
 
-	return renderConfigLines(monitors, activeIndexes), nil
+	return activeIndexes, nil
 }
 
-func buildHorizontalLayout(monitors []monitor, count int) ([]string, error) {
+func buildHorizontalLayout(monitors []monitor, count int) ([]int, error) {
 	activeIndexes := pickPreferredMonitorIndexes(monitors, count, false)
 	if len(activeIndexes) < count {
 		return nil, fmt.Errorf("need at least %d monitors for this layout", count)
 	}
 
-	return renderConfigLines(monitors, activeIndexes), nil
+	return activeIndexes, nil
 }
 
 func pickPreferredMonitorIndexes(monitors []monitor, count int, externalOnly bool) []int {
@@ -154,36 +154,4 @@ func findLaptopMonitorIndex(monitors []monitor) int {
 
 func isLaptopMonitor(name string) bool {
 	return strings.HasPrefix(name, "eDP") || strings.HasPrefix(name, "LVDS")
-}
-
-func renderConfigLines(monitors []monitor, activeIndexes []int) []string {
-	lines := make([]string, 0, len(monitors))
-	offsetX := 0
-	activeSet := make(map[int]struct{}, len(activeIndexes))
-
-	for _, idx := range activeIndexes {
-		activeMonitor := monitors[idx]
-		activeSet[idx] = struct{}{}
-
-		lines = append(lines, fmt.Sprintf(
-			"monitor = %s, %dx%d@%s, %dx0, %s",
-			activeMonitor.Name,
-			activeMonitor.Width,
-			activeMonitor.Height,
-			formatFloat(activeMonitor.RefreshRate),
-			offsetX,
-			formatFloat(activeMonitor.Scale),
-		))
-		offsetX += activeMonitor.Width
-	}
-
-	for idx, mon := range monitors {
-		if _, ok := activeSet[idx]; ok {
-			continue
-		}
-
-		lines = append(lines, fmt.Sprintf("monitor = %s, disable", mon.Name))
-	}
-
-	return lines
 }
