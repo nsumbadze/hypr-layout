@@ -92,6 +92,7 @@ type tuiKeyMap struct {
 	Enter key.Binding
 	Yes   key.Binding
 	No    key.Binding
+	Back  key.Binding
 	Quit  key.Binding
 }
 
@@ -101,6 +102,7 @@ var tuiKeys = tuiKeyMap{
 	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 	Yes:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
 	No:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
+	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
@@ -176,6 +178,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if key.Matches(msg, tuiKeys.Quit) && m.state != tuiApplying && m.state != tuiReloading {
 			return m, tea.Quit
+		}
+		if key.Matches(msg, tuiKeys.Back) && backAllowed(m.state) {
+			return m.goBack()
 		}
 
 	case spinner.TickMsg:
@@ -572,14 +577,19 @@ func (m tuiModel) footerHints() string {
 	dim := func(s string) string { return styleDimmed.Render(s) }
 	acc := func(s string) string { return styleAccent.Render(s) }
 	sep := styleDimmed.Render("  ·  ")
+	back := acc("esc") + " back"
 	switch m.state {
-	case tuiLayoutSelect, tuiModeSelect, tuiDirectionSelect:
+	case tuiLayoutSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + acc("q") + " quit"
+	case tuiModeSelect, tuiDirectionSelect:
+		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + back + sep + acc("q") + " quit"
 	case tuiOrderInput, tuiProfileName:
-		return acc("enter") + " confirm" + sep + acc("q") + " quit"
+		return acc("enter") + " confirm" + sep + back + sep + acc("q") + " quit"
 	case tuiPreview:
-		return dim("↑/↓") + " scroll" + sep + acc("y") + " save profile" + sep + acc("n") + " skip" + sep + acc("q") + " quit"
-	case tuiSaveConfirm, tuiApplyConfirm, tuiReloadConfirm:
+		return dim("↑/↓") + " scroll" + sep + acc("y") + " save profile" + sep + acc("n") + " skip" + sep + back + sep + acc("q") + " quit"
+	case tuiSaveConfirm, tuiApplyConfirm:
+		return acc("y") + " yes" + sep + acc("n") + " no" + sep + back + sep + acc("q") + " quit"
+	case tuiReloadConfirm:
 		return acc("y") + " yes" + sep + acc("n") + " no" + sep + acc("q") + " quit"
 	case tuiDone, tuiErr:
 		return dim("any key") + " exit"
@@ -594,7 +604,7 @@ func (m tuiModel) bodyView() string {
 	case tuiDetecting:
 		return m.spinnerView(contentH, "Detecting monitors…")
 	case tuiLayoutSelect:
-		return m.listView(contentH, "Select a layout")
+		return m.layoutSelectView(contentH)
 	case tuiModeSelect:
 		title := "Select mode"
 		if len(m.activeIndexes) > 0 && m.currentModeIdx < len(m.activeIndexes) {
@@ -644,6 +654,25 @@ func (m tuiModel) spinnerView(h int, label string) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("  " + m.spinner.View() + "  " + styleBase.Render(label) + "\n")
+	return lipgloss.NewStyle().Height(h).Render(b.String())
+}
+
+func (m tuiModel) layoutSelectView(h int) string {
+	var b strings.Builder
+	b.WriteString("\n  " + styleTitle.Render("Detected monitors") + "\n\n")
+	for _, mon := range m.monitors {
+		focused := "  " + styleDimmed.Render("○")
+		if mon.Focused {
+			focused = "  " + styleSuccess.Render("●")
+		}
+		b.WriteString(fmt.Sprintf("%s  %-14s %s\n",
+			focused,
+			styleBase.Render(mon.Name),
+			styleDimmed.Render(fmt.Sprintf("%dx%d @ %sHz", mon.Width, mon.Height, formatFloat(mon.RefreshRate))),
+		))
+	}
+	b.WriteString("\n  " + styleTitle.Render("Select a layout") + "\n\n")
+	b.WriteString(m.list.View())
 	return lipgloss.NewStyle().Height(h).Render(b.String())
 }
 
@@ -756,6 +785,102 @@ func (m tuiModel) errView(h int) string {
 	b.WriteString("\n\n  " + box + "\n\n")
 	b.WriteString("  " + styleDimmed.Render("Press any key to exit.") + "\n")
 	return lipgloss.NewStyle().Height(h).Render(b.String())
+}
+
+// ── back navigation ───────────────────────────────────────────────────────────
+
+// backAllowed returns true for states where pressing Escape navigates back.
+// States where a side-effect has already occurred (writing config, reloading)
+// or where there is no previous step (detecting, done, error) do not allow it.
+func backAllowed(s tuiState) bool {
+	switch s {
+	case tuiModeSelect, tuiDirectionSelect, tuiOrderInput,
+		tuiPreview, tuiSaveConfirm, tuiProfileName, tuiApplyConfirm:
+		return true
+	}
+	return false
+}
+
+func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
+	switch m.state {
+	case tuiModeSelect:
+		if m.currentModeIdx == 0 {
+			m.state = tuiLayoutSelect
+			m.list = m.makeLayoutList()
+			return m, nil
+		}
+		return m.rewindModeSelect()
+
+	case tuiDirectionSelect:
+		return m.rewindToLastModeOrLayout()
+
+	case tuiOrderInput:
+		m.textInput.Blur()
+		m.inputErr = ""
+		m.state = tuiDirectionSelect
+		m.list = m.makeDirectionList()
+		return m, nil
+
+	case tuiPreview:
+		m.state = tuiOrderInput
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = orderPlaceholder(m.activeConfigs)
+		m.inputErr = ""
+		m.textInput.Focus()
+		return m, textinput.Blink
+
+	case tuiSaveConfirm:
+		m.state = tuiPreview
+		return m, nil
+
+	case tuiProfileName:
+		m.textInput.Blur()
+		m.inputErr = ""
+		m.state = tuiSaveConfirm
+		return m, nil
+
+	case tuiApplyConfirm:
+		m.state = tuiPreview
+		return m, nil
+	}
+	return m, nil
+}
+
+// rewindModeSelect moves back to the previous monitor that has selectable modes,
+// skipping any monitors that were auto-selected (no available modes).
+func (m tuiModel) rewindModeSelect() (tuiModel, tea.Cmd) {
+	for i := m.currentModeIdx - 1; i >= 0; i-- {
+		idx := m.activeIndexes[i]
+		mon := m.monitors[idx]
+		if modes := availableMonitorModes(mon); len(modes) > 0 {
+			m.currentModeIdx = i
+			m.state = tuiModeSelect
+			m.list = m.makeModeList(mon, modes)
+			return m, nil
+		}
+	}
+	// No previous monitor has selectable modes — go all the way back to layout.
+	m.state = tuiLayoutSelect
+	m.list = m.makeLayoutList()
+	return m, nil
+}
+
+// rewindToLastModeOrLayout moves back from direction select to the last
+// monitor that had selectable modes, or to layout select if all were auto-selected.
+func (m tuiModel) rewindToLastModeOrLayout() (tuiModel, tea.Cmd) {
+	for i := len(m.activeIndexes) - 1; i >= 0; i-- {
+		idx := m.activeIndexes[i]
+		mon := m.monitors[idx]
+		if modes := availableMonitorModes(mon); len(modes) > 0 {
+			m.currentModeIdx = i
+			m.state = tuiModeSelect
+			m.list = m.makeModeList(mon, modes)
+			return m, nil
+		}
+	}
+	m.state = tuiLayoutSelect
+	m.list = m.makeLayoutList()
+	return m, nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
