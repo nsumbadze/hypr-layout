@@ -1,9 +1,6 @@
 package main
 
-import (
-	"reflect"
-	"testing"
-)
+import "testing"
 
 func TestParseLayoutSelection(t *testing.T) {
 	options := layoutOptions()
@@ -18,36 +15,37 @@ func TestParseLayoutSelection(t *testing.T) {
 	}
 }
 
-func TestBuildPreviewConfigDualHorizontal(t *testing.T) {
+func TestActiveIndexesForLayoutDualHorizontal(t *testing.T) {
 	monitors := []monitor{
 		{Name: "eDP-1", Width: 2880, Height: 1800, RefreshRate: 120, Scale: 1.5},
 		{Name: "DP-1", Width: 2560, Height: 1440, RefreshRate: 165, Scale: 1},
 		{Name: "HDMI-A-1", Width: 1920, Height: 1080, RefreshRate: 60, Scale: 1},
 	}
 
-	lines, err := buildPreviewConfig(monitors, 3)
+	indexes, err := activeIndexesForLayout(monitors, 3)
 	if err != nil {
-		t.Fatalf("buildPreviewConfig returned error: %v", err)
+		t.Fatalf("activeIndexesForLayout returned error: %v", err)
 	}
 
-	want := []string{
-		"monitor = DP-1, 2560x1440@165, 0x0, 1",
-		"monitor = HDMI-A-1, 1920x1080@60, 2560x0, 1",
-		"monitor = eDP-1, disable",
+	want := []int{1, 2}
+	if len(indexes) != len(want) {
+		t.Fatalf("unexpected index count: got %d want %d", len(indexes), len(want))
 	}
 
-	if !reflect.DeepEqual(lines, want) {
-		t.Fatalf("unexpected lines:\nwant: %#v\ngot:  %#v", want, lines)
+	for i := range want {
+		if indexes[i] != want[i] {
+			t.Fatalf("unexpected indexes: got %#v want %#v", indexes, want)
+		}
 	}
 }
 
-func TestBuildPreviewConfigTripleHorizontalNeedsThreeMonitors(t *testing.T) {
+func TestActiveIndexesForLayoutTripleHorizontalNeedsThreeMonitors(t *testing.T) {
 	monitors := []monitor{
 		{Name: "eDP-1", Width: 2880, Height: 1800, RefreshRate: 120, Scale: 1.5},
 		{Name: "DP-1", Width: 2560, Height: 1440, RefreshRate: 165, Scale: 1},
 	}
 
-	_, err := buildPreviewConfig(monitors, 4)
+	_, err := activeIndexesForLayout(monitors, 4)
 	if err == nil {
 		t.Fatal("expected error for missing third monitor")
 	}
