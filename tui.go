@@ -928,8 +928,12 @@ func (m tuiModel) resizeComponents() tuiModel {
 	// Only resize the list when it has been initialised; calling SetSize on a
 	// zero-value list.Model panics because its internal paginator is nil.
 	switch m.state {
-	case tuiLayoutSelect, tuiModeSelect, tuiDirectionSelect:
+	case tuiLayoutSelect, tuiModeSelect:
 		m.list.SetSize(m.width-4, listH)
+	case tuiDirectionSelect:
+		// Direction list has exactly 4 fixed items. Keep it compact so the
+		// live preview has room below it on the same screen.
+		m.list.SetSize(m.width-4, directionListHeight)
 	}
 
 	vpW := m.width - 10
@@ -964,6 +968,11 @@ func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 	return m.newStyledList(items)
 }
 
+// directionListHeight is the fixed list height for the direction screen.
+// The list has exactly 4 items; keeping it compact lets the preview render
+// on the same screen without being pushed off the bottom.
+const directionListHeight = 4
+
 func (m tuiModel) makeDirectionList() list.Model {
 	items := []list.Item{
 		dirListItem{name: "Left → right", dir: leftToRight},
@@ -971,7 +980,9 @@ func (m tuiModel) makeDirectionList() list.Model {
 		dirListItem{name: "Top → bottom", dir: topToBottom},
 		dirListItem{name: "Bottom → top", dir: bottomToTop},
 	}
-	return m.newStyledList(items)
+	l := m.newStyledList(items)
+	l.SetSize(m.width-4, directionListHeight)
+	return l
 }
 
 func (m tuiModel) newStyledList(items []list.Item) list.Model {
