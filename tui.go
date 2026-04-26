@@ -841,6 +841,7 @@ func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
 		m.inputErr = ""
 		m.state = tuiDirectionSelect
 		m.list = m.makeDirectionList()
+		m.list.Select(directionListIdx(m.direction))
 		return m, nil
 
 	case tuiPreview:
@@ -870,6 +871,7 @@ func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
 
 // rewindModeSelect moves back to the previous monitor that has selectable modes,
 // skipping any monitors that were auto-selected (no available modes).
+// The list cursor is restored to the previously chosen mode for that monitor.
 func (m tuiModel) rewindModeSelect() (tuiModel, tea.Cmd) {
 	for i := m.currentModeIdx - 1; i >= 0; i-- {
 		idx := m.activeIndexes[i]
@@ -878,6 +880,9 @@ func (m tuiModel) rewindModeSelect() (tuiModel, tea.Cmd) {
 			m.currentModeIdx = i
 			m.state = tuiModeSelect
 			m.list = m.makeModeList(mon, modes)
+			if prev, ok := m.selectedModes[idx]; ok {
+				m.list.Select(modeListIdx(prev, modes))
+			}
 			return m, nil
 		}
 	}
@@ -889,6 +894,7 @@ func (m tuiModel) rewindModeSelect() (tuiModel, tea.Cmd) {
 
 // rewindToLastModeOrLayout moves back from direction select to the last
 // monitor that had selectable modes, or to layout select if all were auto-selected.
+// The list cursor is restored to the previously chosen mode for that monitor.
 func (m tuiModel) rewindToLastModeOrLayout() (tuiModel, tea.Cmd) {
 	for i := len(m.activeIndexes) - 1; i >= 0; i-- {
 		idx := m.activeIndexes[i]
@@ -897,6 +903,9 @@ func (m tuiModel) rewindToLastModeOrLayout() (tuiModel, tea.Cmd) {
 			m.currentModeIdx = i
 			m.state = tuiModeSelect
 			m.list = m.makeModeList(mon, modes)
+			if prev, ok := m.selectedModes[idx]; ok {
+				m.list.Select(modeListIdx(prev, modes))
+			}
 			return m, nil
 		}
 	}
@@ -993,6 +1002,31 @@ func (m tuiModel) newStyledList(items []list.Item) list.Model {
 	l.KeyMap.Quit = key.NewBinding()
 	l.KeyMap.ForceQuit = key.NewBinding()
 	return l
+}
+
+// directionListIdx returns the list index for a given direction constant,
+// matching the order in makeDirectionList.
+func directionListIdx(d layoutDirection) int {
+	switch d {
+	case rightToLeft:
+		return 1
+	case topToBottom:
+		return 2
+	case bottomToTop:
+		return 3
+	}
+	return 0 // leftToRight
+}
+
+// modeListIdx returns the list index of the given mode in a slice of modes,
+// or 0 if not found.
+func modeListIdx(selected monitorMode, modes []monitorMode) int {
+	for i, m := range modes {
+		if m.Width == selected.Width && m.Height == selected.Height && m.RefreshRate == selected.RefreshRate {
+			return i
+		}
+	}
+	return 0
 }
 
 func orderPlaceholder(configs []activeMonitorConfig) string {
