@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // renderPreview is used by non-interactive flows (quick, apply).
@@ -100,6 +103,234 @@ func renderMonitorOrderPrompt(monitors []monitor, activeConfigs []activeMonitorC
 	}
 	b.WriteString("\n  " + stylePromptGlyph.Render("❯ ") + styleMuted.Render("Enter monitor order by indices (e.g. \"2 1 3\"): "))
 	return b.String()
+}
+
+// ── direction layout preview ──────────────────────────────────────────────────
+
+// layoutPreviewEntry holds the visual position and display data for one monitor
+// in the ASCII layout diagram.
+type layoutPreviewEntry struct {
+	name   string
+	mode   monitorMode
+	pixelX int
+	pixelY int
+}
+
+// renderDirectionPreview returns a proportionally-scaled ASCII art diagram
+// showing how the active monitors will be arranged for the given direction.
+// It is called live while the user navigates the direction list in the TUI.
+func renderDirectionPreview(monitors []monitor, configs []activeMonitorConfig, direction layoutDirection, availWidth int) string {
+	if len(configs) == 0 {
+		return ""
+	}
+
+	entries := buildLayoutEntries(monitors, configs, direction)
+
+	// Normalise so the top-left corner of the bounding box is (0, 0).
+	minX, minY := entries[0].pixelX, entries[0].pixelY
+	for _, e := range entries {
+		if e.pixelX < minX {
+			minX = e.pixelX
+		}
+		if e.pixelY < minY {
+			minY = e.pixelY
+		}
+	}
+	for i := range entries {
+		entries[i].pixelX -= minX
+		entries[i].pixelY -= minY
+	}
+
+	isHorizontal := direction == leftToRight || direction == rightToLeft
+
+	// Sort by visual position so boxes appear left-to-right or top-to-bottom.
+	sort.Slice(entries, func(i, j int) bool {
+		if isHorizontal {
+			return entries[i].pixelX < entries[j].pixelX
+		}
+		return entries[i].pixelY < entries[j].pixelY
+	})
+
+	if isHorizontal {
+		return renderHorizPreview(entries, availWidth)
+	}
+	return renderVertPreview(entries, availWidth)
+}
+
+// buildLayoutEntries computes pixel positions using the same arithmetic as
+// renderPositionedConfigLines so the preview always matches the real output.
+func buildLayoutEntries(monitors []monitor, configs []activeMonitorConfig, direction layoutDirection) []layoutPreviewEntry {
+	entries := make([]layoutPreviewEntry, len(configs))
+	posX, posY := 0, 0
+
+	for i, cfg := range configs {
+		mon := monitors[cfg.Index]
+
+		if i > 0 {
+			switch direction {
+			case rightToLeft:
+				posX -= cfg.Mode.Width
+			case bottomToTop:
+				posY -= cfg.Mode.Height
+			}
+		}
+
+		entries[i] = layoutPreviewEntry{
+			name:   mon.Name,
+			mode:   cfg.Mode,
+			pixelX: posX,
+			pixelY: posY,
+		}
+
+		switch direction {
+		case leftToRight:
+			posX += cfg.Mode.Width
+		case topToBottom:
+			posY += cfg.Mode.Height
+		}
+	}
+	return entries
+}
+
+// boxOverhead is the total horizontal chars consumed by border (1+1) and
+// padding (1+1) in each preview box.
+const boxOverhead = 4
+
+func renderHorizPreview(entries []layoutPreviewEntry, availWidth int) string {
+	const fixedH = 5
+
+	n := len(entries)
+	totalPxW := 0
+	for _, e := range entries {
+		totalPxW += e.mode.Width
+	}
+	if totalPxW == 0 {
+		return ""
+	}
+
+	// Distribute available chars proportionally; reserve 1 char gap between boxes.
+	usableW := availWidth - (n - 1)
+	minPerBox := boxOverhead + 6
+	if usableW < n*minPerBox {
+		usableW = n * minPerBox
+	}
+
+	boxes := make([]string, n)
+	for i, e := range entries {
+		totalBoxW := (e.mode.Width * usableW) / totalPxW
+		if totalBoxW < minPerBox {
+			totalBoxW = minPerBox
+		}
+		// Right margin of 1 between boxes (except last) creates the visual gap
+		// without needing an explicit spacer element.
+		marginRight := 0
+		if i < n-1 {
+			marginRight = 1
+		}
+		boxes[i] = previewBox(e.name, e.mode, totalBoxW-boxOverhead, fixedH, marginRight)
+	}
+
+	// JoinHorizontal places multi-line boxes side by side correctly.
+	return lipgloss.JoinHorizontal(lipgloss.Top, boxes...)
+}
+
+func renderVertPreview(entries []layoutPreviewEntry, availWidth int) string {
+	const maxTotalH = 18
+	const minBoxH = 4
+
+	n := len(entries)
+	if n == 0 {
+		return ""
+	}
+
+	totalPxH := 0
+	maxPxW := 0
+	for _, e := range entries {
+		totalPxH += e.mode.Height
+		if e.mode.Width > maxPxW {
+			maxPxW = e.mode.Width
+		}
+	}
+	if totalPxH == 0 || maxPxW == 0 {
+		return ""
+	}
+
+	maxInnerW := availWidth - boxOverhead
+	if maxInnerW < 12 {
+		maxInnerW = 12
+	}
+
+	boxes := make([]string, n)
+	for i, e := range entries {
+		// Scale height proportionally to monitor height.
+		boxH := (e.mode.Height * maxTotalH) / totalPxH
+		if boxH < minBoxH {
+			boxH = minBoxH
+		}
+		// Scale width relative to the widest monitor in this layout.
+		innerW := (e.mode.Width * maxInnerW) / maxPxW
+		if innerW < 12 {
+			innerW = 12
+		}
+		boxes[i] = previewBox(e.name, e.mode, innerW, boxH, 0)
+	}
+
+	return strings.Join(boxes, "\n")
+}
+
+// previewBox renders a single labelled monitor box for the direction preview.
+// innerW is the content width (excluding border/padding), totalH is the full
+// rendered height (including border lines), marginRight adds right margin.
+func previewBox(name string, mode monitorMode, innerW, totalH, marginRight int) string {
+	if innerW < 4 {
+		innerW = 4
+	}
+
+	trunc := func(s string, max int) string {
+		if len(s) <= max {
+			return s
+		}
+		if max <= 1 {
+			return "…"
+		}
+		return s[:max-1] + "…"
+	}
+
+	// Interior height = totalH minus top and bottom border chars.
+	innerH := totalH - 2
+	if innerH < 1 {
+		innerH = 1
+	}
+
+	contentLines := make([]string, innerH)
+	contentLines[0] = styleBase.Render(trunc(name, innerW))
+	if innerH >= 2 {
+		contentLines[1] = styleDimmed.Render(trunc(formatMonitorMode(mode), innerW))
+	}
+	// Remaining lines stay empty (padding).
+
+	content := strings.Join(contentLines, "\n")
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorBorder).
+		Padding(0, 1).
+		Width(innerW).
+		MarginRight(marginRight).
+		Render(content)
+}
+
+// indentBlock adds n spaces to the start of every non-empty line in s.
+// Used to align multi-line preview blocks with the rest of the TUI body.
+func indentBlock(s string, n int) string {
+	prefix := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if l != "" {
+			lines[i] = prefix + l
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ── shared formatting ─────────────────────────────────────────────────────────

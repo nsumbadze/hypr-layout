@@ -616,7 +616,7 @@ func (m tuiModel) bodyView() string {
 		}
 		return m.listView(contentH, title)
 	case tuiDirectionSelect:
-		return m.listView(contentH, "Select layout direction")
+		return m.directionSelectView(contentH)
 	case tuiOrderInput:
 		return m.orderInputView(contentH)
 	case tuiPreview:
@@ -654,6 +654,28 @@ func (m tuiModel) spinnerView(h int, label string) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("  " + m.spinner.View() + "  " + styleBase.Render(label) + "\n")
+	return lipgloss.NewStyle().Height(h).Render(b.String())
+}
+
+func (m tuiModel) directionSelectView(h int) string {
+	var b strings.Builder
+	b.WriteString("\n  " + styleTitle.Render("Select layout direction") + "\n\n")
+	b.WriteString(m.list.View())
+
+	// Live preview: recalculate and redraw for whichever item is highlighted.
+	if item, ok := m.list.SelectedItem().(dirListItem); ok && len(m.activeConfigs) > 0 {
+		previewW := m.width - 6
+		if previewW < 24 {
+			previewW = 24
+		}
+		preview := renderDirectionPreview(m.monitors, m.activeConfigs, item.dir, previewW)
+		if preview != "" {
+			b.WriteString("\n\n  " + styleTitle.Render("Preview") + "\n\n")
+			b.WriteString(indentBlock(preview, 2))
+			b.WriteByte('\n')
+		}
+	}
+
 	return lipgloss.NewStyle().Height(h).Render(b.String())
 }
 
