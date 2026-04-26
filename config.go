@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -13,33 +12,13 @@ import (
 const monitorConfigMode = 0o644
 
 type applyResult struct {
-	ConfigPath string
-	BackupPath string
+	ConfigPath        string
+	BackupPath        string
+	HadPreviousConfig bool
 }
 
 func promptApplyConfirmation(r io.Reader, w io.Writer) (bool, error) {
-	reader := bufio.NewReader(r)
-
-	for {
-		fmt.Fprint(w, "\nApply this layout to ~/.config/hypr/monitors.conf? (y/n) ")
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && strings.TrimSpace(input) != "" {
-				return parseConfirmation(input)
-			}
-
-			return false, err
-		}
-
-		confirmed, parseErr := parseConfirmation(input)
-		if parseErr != nil {
-			fmt.Fprintln(w, "Invalid selection: enter y or n.")
-			continue
-		}
-
-		return confirmed, nil
-	}
+	return promptYesNo(r, w, "\nApply this layout to ~/.config/hypr/monitors.conf? (y/n) ")
 }
 
 func parseConfirmation(input string) (bool, error) {
@@ -67,7 +46,7 @@ func applyMonitorConfig(configPath string, lines []string, now time.Time) (apply
 		return applyResult{}, fmt.Errorf("create config directory: %w", err)
 	}
 
-	backupPath, err := backupExistingConfig(configPath, now)
+	backupPath, hadPreviousConfig, err := backupExistingConfig(configPath, now)
 	if err != nil {
 		return applyResult{}, err
 	}
@@ -82,31 +61,32 @@ func applyMonitorConfig(configPath string, lines []string, now time.Time) (apply
 	}
 
 	return applyResult{
-		ConfigPath: configPath,
-		BackupPath: backupPath,
+		ConfigPath:        configPath,
+		BackupPath:        backupPath,
+		HadPreviousConfig: hadPreviousConfig,
 	}, nil
 }
 
-func backupExistingConfig(configPath string, now time.Time) (string, error) {
+func backupExistingConfig(configPath string, now time.Time) (string, bool, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil
+			return "", false, nil
 		}
 
-		return "", fmt.Errorf("read existing config: %w", err)
+		return "", false, fmt.Errorf("read existing config: %w", err)
 	}
 
 	backupPath := backupPathFor(configPath, now)
 	if err := os.WriteFile(backupPath, data, monitorConfigMode); err != nil {
-		return "", fmt.Errorf("create backup file: %w", err)
+		return "", false, fmt.Errorf("create backup file: %w", err)
 	}
 
 	if err := os.Chmod(backupPath, monitorConfigMode); err != nil {
-		return "", fmt.Errorf("set backup permissions: %w", err)
+		return "", false, fmt.Errorf("set backup permissions: %w", err)
 	}
 
-	return backupPath, nil
+	return backupPath, true, nil
 }
 
 func backupPathFor(configPath string, now time.Time) string {
