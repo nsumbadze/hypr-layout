@@ -79,8 +79,10 @@ func renderMonitorModes(mon monitor, current monitorMode, modes []monitorMode) s
 func renderLayoutDirections() string {
 	var b strings.Builder
 	b.WriteString("\n  " + styleTitle.Render("Layout direction") + "\n\n")
-	b.WriteString("  " + styleDimmed.Render("1.") + "  " + styleBase.Render("Horizontal  (left → right)") + "\n")
-	b.WriteString("  " + styleDimmed.Render("2.") + "  " + styleBase.Render("Vertical    (top → bottom)") + "\n")
+	b.WriteString("  " + styleDimmed.Render("1.") + "  " + styleBase.Render("Left → right") + "\n")
+	b.WriteString("  " + styleDimmed.Render("2.") + "  " + styleBase.Render("Right → left") + "\n")
+	b.WriteString("  " + styleDimmed.Render("3.") + "  " + styleBase.Render("Top → bottom") + "\n")
+	b.WriteString("  " + styleDimmed.Render("4.") + "  " + styleBase.Render("Bottom → top") + "\n")
 	b.WriteString("\n  " + stylePromptGlyph.Render("❯ ") + styleMuted.Render("Select layout direction: "))
 	return b.String()
 }

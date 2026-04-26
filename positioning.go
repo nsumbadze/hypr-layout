@@ -11,8 +11,10 @@ import (
 type layoutDirection string
 
 const (
-	horizontalDirection layoutDirection = "horizontal"
-	verticalDirection   layoutDirection = "vertical"
+	leftToRight layoutDirection = "left-to-right"
+	rightToLeft layoutDirection = "right-to-left"
+	topToBottom layoutDirection = "top-to-bottom"
+	bottomToTop layoutDirection = "bottom-to-top"
 )
 
 type activeMonitorConfig struct {
@@ -48,11 +50,15 @@ func promptLayoutDirection(r io.Reader, w io.Writer) (layoutDirection, error) {
 func parseLayoutDirection(input string) (layoutDirection, error) {
 	switch strings.TrimSpace(input) {
 	case "1":
-		return horizontalDirection, nil
+		return leftToRight, nil
 	case "2":
-		return verticalDirection, nil
+		return rightToLeft, nil
+	case "3":
+		return topToBottom, nil
+	case "4":
+		return bottomToTop, nil
 	default:
-		return "", fmt.Errorf("enter 1 or 2")
+		return "", fmt.Errorf("enter a number between 1 and 4")
 	}
 }
 
@@ -131,15 +137,36 @@ func buildActiveMonitorConfigs(monitors []monitor, activeIndexes []int, selected
 	return configs
 }
 
+// renderPositionedConfigLines generates monitor config lines for the ordered
+// active monitors followed by disabled monitors.
+//
+// Coordinate rules (Hyprland: Y increases downward):
+//
+//	left-to-right : each monitor shifts right by the previous monitor's width.
+//	right-to-left : each monitor shifts left by its own width (produces negative X).
+//	top-to-bottom : each monitor shifts down by the previous monitor's height.
+//	bottom-to-top : each monitor shifts up by its own height (produces negative Y).
 func renderPositionedConfigLines(monitors []monitor, activeConfigs []activeMonitorConfig, direction layoutDirection) []string {
 	lines := make([]string, 0, len(monitors))
 	activeSet := make(map[int]struct{}, len(activeConfigs))
 	positionX := 0
 	positionY := 0
 
-	for _, config := range activeConfigs {
+	for i, config := range activeConfigs {
 		mon := monitors[config.Index]
 		activeSet[config.Index] = struct{}{}
+
+		// right-to-left and bottom-to-top subtract the current monitor's
+		// dimension before placing so that monitor[0] lands at 0x0 and
+		// every subsequent monitor accumulates a negative offset.
+		if i > 0 {
+			switch direction {
+			case rightToLeft:
+				positionX -= config.Mode.Width
+			case bottomToTop:
+				positionY -= config.Mode.Height
+			}
+		}
 
 		lines = append(lines, fmt.Sprintf(
 			"monitor = %s, %s, %dx%d, %s",
@@ -151,10 +178,10 @@ func renderPositionedConfigLines(monitors []monitor, activeConfigs []activeMonit
 		))
 
 		switch direction {
-		case verticalDirection:
-			positionY += config.Mode.Height
-		default:
+		case leftToRight:
 			positionX += config.Mode.Width
+		case topToBottom:
+			positionY += config.Mode.Height
 		}
 	}
 

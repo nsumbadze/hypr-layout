@@ -98,7 +98,7 @@ func runQuickPreset(preset string, args []string) error {
 		return fmt.Errorf("could not determine active monitors: %w", err)
 	}
 	activeConfigs := buildActiveMonitorConfigs(monitors, activeIndexes, autoSelectMonitorModes(monitors, activeIndexes))
-	lines := renderPositionedConfigLines(monitors, activeConfigs, horizontalDirection)
+	lines := renderPositionedConfigLines(monitors, activeConfigs, leftToRight)
 	fmt.Print(renderPreview("Quick: "+preset, lines))
 	return applyPreviewFlow(lines, options)
 }

@@ -485,7 +485,7 @@ func (m tuiModel) updateReloadConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 	case key.Matches(km, tuiKeys.No):
 		m.statusLines = append(m.statusLines,
-			styleDimmed.Render("  Run ") + styleAccent.Render("hyprctl reload") + styleDimmed.Render(" manually to apply."),
+			styleDimmed.Render("  Run ")+styleAccent.Render("hyprctl reload")+styleDimmed.Render(" manually to apply."),
 		)
 		m.state = tuiDone
 		return m, nil
@@ -810,8 +810,10 @@ func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 
 func (m tuiModel) makeDirectionList() list.Model {
 	items := []list.Item{
-		dirListItem{name: "Horizontal  (left → right)", dir: horizontalDirection},
-		dirListItem{name: "Vertical    (top → bottom)", dir: verticalDirection},
+		dirListItem{name: "Left → right", dir: leftToRight},
+		dirListItem{name: "Right → left", dir: rightToLeft},
+		dirListItem{name: "Top → bottom", dir: topToBottom},
+		dirListItem{name: "Bottom → top", dir: bottomToTop},
 	}
 	return m.newStyledList(items)
 }

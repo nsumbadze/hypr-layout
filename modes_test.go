@@ -72,7 +72,7 @@ func TestAvailableMonitorModesFallsBackToCurrentViaRenderer(t *testing.T) {
 		},
 	}
 
-	lines := renderPositionedConfigLines(monitors, buildActiveMonitorConfigs(monitors, []int{0}, nil), horizontalDirection)
+	lines := renderPositionedConfigLines(monitors, buildActiveMonitorConfigs(monitors, []int{0}, nil), leftToRight)
 	want := []string{"monitor = DP-1, 2560x1440@165, 0x0, 1"}
 
 	if !reflect.DeepEqual(lines, want) {
