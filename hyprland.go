@@ -8,15 +8,16 @@ import (
 )
 
 type monitor struct {
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Width       int     `json:"width"`
-	Height      int     `json:"height"`
-	RefreshRate float64 `json:"refreshRate"`
-	X           int     `json:"x"`
-	Y           int     `json:"y"`
-	Scale       float64 `json:"scale"`
-	Focused     bool    `json:"focused"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Width          int      `json:"width"`
+	Height         int      `json:"height"`
+	RefreshRate    float64  `json:"refreshRate"`
+	X              int      `json:"x"`
+	Y              int      `json:"y"`
+	Scale          float64  `json:"scale"`
+	Focused        bool     `json:"focused"`
+	AvailableModes []string `json:"availableModes"`
 }
 
 func readMonitorsJSON(ctx context.Context) ([]byte, error) {

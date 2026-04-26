@@ -56,6 +56,55 @@ func renderPreview(layoutName string, lines []string) string {
 	return b.String()
 }
 
+func renderProfileList(profiles []string) string {
+	if len(profiles) == 0 {
+		return "Saved profiles:\n\nNo saved profiles.\n"
+	}
+
+	var b strings.Builder
+	b.WriteString("Saved profiles:\n\n")
+	for _, profile := range profiles {
+		fmt.Fprintf(&b, "%s\n", profile)
+	}
+
+	return b.String()
+}
+
+func renderMonitorModes(mon monitor, current monitorMode, modes []monitorMode) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nModes for %s:\n", mon.Name)
+	fmt.Fprintf(&b, "Current: %s\n\n", formatMonitorMode(current))
+
+	for i, mode := range modes {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, formatMonitorMode(mode))
+	}
+
+	b.WriteString("\nSelect a mode (Enter keeps current): ")
+	return b.String()
+}
+
+func renderLayoutDirections() string {
+	var b strings.Builder
+	b.WriteString("\nLayout direction:\n\n")
+	b.WriteString("1. Horizontal (left -> right)\n")
+	b.WriteString("2. Vertical (top -> bottom)\n")
+	b.WriteString("\nSelect layout direction: ")
+	return b.String()
+}
+
+func renderMonitorOrderPrompt(monitors []monitor, activeConfigs []activeMonitorConfig) string {
+	var b strings.Builder
+	b.WriteString("\nActive monitors:\n\n")
+
+	for i, config := range activeConfigs {
+		mon := monitors[config.Index]
+		fmt.Fprintf(&b, "%d. %s (%s)\n", i+1, mon.Name, formatMonitorMode(config.Mode))
+	}
+
+	b.WriteString("\nEnter monitor order by indices (e.g. \"2 1 3\"): ")
+	return b.String()
+}
+
 func fallbackDescription(description string) string {
 	if description == "" {
 		return "Unknown"
