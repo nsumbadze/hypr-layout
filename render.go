@@ -140,7 +140,10 @@ type layoutPreviewEntry struct {
 // renderDirectionPreview returns a proportionally-scaled ASCII art diagram
 // showing how the active monitors will be arranged for the given direction.
 // It is called live while the user navigates the direction list in the TUI.
-func renderDirectionPreview(monitors []monitor, configs []activeMonitorConfig, direction layoutDirection, availWidth int) string {
+// availHeight caps the total diagram height so it fits the terminal; when
+// there is not enough room for even minimal boxes, an empty string is
+// returned and the caller skips the preview section.
+func renderDirectionPreview(monitors []monitor, configs []activeMonitorConfig, direction layoutDirection, availWidth, availHeight int) string {
 	if len(configs) == 0 {
 		return ""
 	}
@@ -173,9 +176,9 @@ func renderDirectionPreview(monitors []monitor, configs []activeMonitorConfig, d
 	})
 
 	if isHorizontal {
-		return renderHorizPreview(entries, availWidth)
+		return renderHorizPreview(entries, availWidth, availHeight)
 	}
-	return renderVertPreview(entries, availWidth)
+	return renderVertPreview(entries, availWidth, availHeight)
 }
 
 // buildLayoutEntries computes pixel positions using the same arithmetic as
@@ -220,8 +223,18 @@ func buildLayoutEntries(monitors []monitor, configs []activeMonitorConfig, direc
 // padding (1+1) in each preview box.
 const boxOverhead = 4
 
-func renderHorizPreview(entries []layoutPreviewEntry, availWidth int) string {
-	const fixedH = 5
+// minPreviewBoxH is the shortest useful box: two border lines plus the
+// monitor name.
+const minPreviewBoxH = 3
+
+func renderHorizPreview(entries []layoutPreviewEntry, availWidth, availHeight int) string {
+	boxH := 5
+	if boxH > availHeight {
+		boxH = availHeight
+	}
+	if boxH < minPreviewBoxH {
+		return ""
+	}
 
 	n := len(entries)
 	totalPxW := 0
@@ -251,20 +264,22 @@ func renderHorizPreview(entries []layoutPreviewEntry, availWidth int) string {
 		if i < n-1 {
 			marginRight = 1
 		}
-		boxes[i] = previewBox(e.name, e.mode, totalBoxW-boxOverhead, fixedH, marginRight)
+		boxes[i] = previewBox(e.name, e.mode, totalBoxW-boxOverhead, boxH, marginRight)
 	}
 
 	// JoinHorizontal places multi-line boxes side by side correctly.
 	return lipgloss.JoinHorizontal(lipgloss.Top, boxes...)
 }
 
-func renderVertPreview(entries []layoutPreviewEntry, availWidth int) string {
-	const maxTotalH = 18
-	const minBoxH = 4
-
+func renderVertPreview(entries []layoutPreviewEntry, availWidth, availHeight int) string {
 	n := len(entries)
-	if n == 0 {
+	if n == 0 || availHeight < n*minPreviewBoxH {
 		return ""
+	}
+
+	maxTotalH := availHeight
+	if maxTotalH > 18 {
+		maxTotalH = 18
 	}
 
 	totalPxH := 0
@@ -284,19 +299,41 @@ func renderVertPreview(entries []layoutPreviewEntry, availWidth int) string {
 		maxInnerW = 12
 	}
 
+	// Scale heights proportionally to monitor height, with a minimum per box.
+	heights := make([]int, n)
+	total := 0
+	for i, e := range entries {
+		heights[i] = (e.height * maxTotalH) / totalPxH
+		if heights[i] < minPreviewBoxH {
+			heights[i] = minPreviewBoxH
+		}
+		total += heights[i]
+	}
+	// Minimum clamping can push the total past the budget; shrink the tallest
+	// boxes until everything fits (guaranteed to terminate because
+	// availHeight >= n*minPreviewBoxH).
+	for total > availHeight {
+		tallest := 0
+		for i, h := range heights {
+			if h > heights[tallest] {
+				tallest = i
+			}
+		}
+		if heights[tallest] <= minPreviewBoxH {
+			break
+		}
+		heights[tallest]--
+		total--
+	}
+
 	boxes := make([]string, n)
 	for i, e := range entries {
-		// Scale height proportionally to monitor height.
-		boxH := (e.height * maxTotalH) / totalPxH
-		if boxH < minBoxH {
-			boxH = minBoxH
-		}
 		// Scale width relative to the widest monitor in this layout.
 		innerW := (e.width * maxInnerW) / maxPxW
 		if innerW < 12 {
 			innerW = 12
 		}
-		boxes[i] = previewBox(e.name, e.mode, innerW, boxH, 0)
+		boxes[i] = previewBox(e.name, e.mode, innerW, heights[i], 0)
 	}
 
 	return strings.Join(boxes, "\n")

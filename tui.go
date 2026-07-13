@@ -834,7 +834,11 @@ func (m tuiModel) directionSelectView(h int) string {
 		if previewW < 24 {
 			previewW = 24
 		}
-		preview := renderDirectionPreview(m.monitors, m.activeConfigs, item.dir, previewW)
+		// The body must fit in h lines or the terminal clips it: 6 lines of
+		// title/spacing/"Preview" chrome plus the list leaves this much room
+		// for the diagram itself.
+		previewH := h - 6 - directionListHeight
+		preview := renderDirectionPreview(m.monitors, m.activeConfigs, item.dir, previewW, previewH)
 		if preview != "" {
 			b.WriteString("\n\n  " + styleTitle.Render("Preview") + "\n\n")
 			b.WriteString(indentBlock(preview, 2))
@@ -1201,9 +1205,10 @@ func (m tuiModel) makeVRRList(current int) list.Model {
 }
 
 // directionListHeight is the fixed list height for the direction screen.
-// The list has exactly 4 items; keeping it compact lets the preview render
-// on the same screen without being pushed off the bottom.
-const directionListHeight = 4
+// The list has exactly 4 items; one extra row keeps the paginator hidden so
+// all four directions are visible at once, while staying compact enough for
+// the live preview to render below on the same screen.
+const directionListHeight = 5
 
 func (m tuiModel) makeDirectionList() list.Model {
 	items := []list.Item{
