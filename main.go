@@ -26,8 +26,16 @@ func run(args []string) error {
 		return runApplyProfile(args[1], args[2:])
 	case len(args) >= 2 && args[0] == "quick":
 		return runQuickPreset(args[1], args[2:])
+	case len(args) >= 1 && len(args) <= 2 && args[0] == "export":
+		exportPath := ""
+		if len(args) == 2 {
+			exportPath = args[1]
+		}
+		return runExportProfiles(exportPath)
+	case len(args) >= 2 && args[0] == "import":
+		return runImportProfiles(args[1], args[2:])
 	default:
-		return fmt.Errorf("usage: hypr-layout [list | apply <profile-name> [--yes] [--no-reload] | quick <preset> [--yes] [--no-reload] [--direction <dir>] [--order <indices>]]")
+		return fmt.Errorf("usage: hypr-layout [list | apply <profile-name> [--yes] [--no-reload] | quick <preset> [--yes] [--no-reload] [--direction <dir>] [--order <indices>] [--mode <strategy>] [--transform <0-7>] [--vrr <0-2>] | export [file] | import <file> [--force]]")
 	}
 }
 
@@ -57,6 +65,68 @@ func runListProfiles() error {
 		return fmt.Errorf("could not list profiles: %w", err)
 	}
 	fmt.Print(renderProfileList(profiles))
+	return nil
+}
+
+// runExportProfiles writes all saved profiles as a JSON bundle to the given
+// file, or to stdout when no file is given (kept unstyled so it can be piped).
+func runExportProfiles(exportPath string) error {
+	profilesDir, err := defaultProfilesDir()
+	if err != nil {
+		return fmt.Errorf("could not determine profiles directory: %w", err)
+	}
+	set, err := exportProfileSet(profilesDir)
+	if err != nil {
+		return fmt.Errorf("could not export profiles: %w", err)
+	}
+	data, err := encodeProfileSet(set)
+	if err != nil {
+		return err
+	}
+	if exportPath == "" {
+		fmt.Print(string(data))
+		return nil
+	}
+	if err := os.WriteFile(exportPath, data, monitorConfigMode); err != nil {
+		return fmt.Errorf("could not write export file: %w", err)
+	}
+	fmt.Print(renderInlineStatus(styleSuccess.Render("✓"), fmt.Sprintf("Exported %d profile(s) to %s", len(set.Profiles), exportPath)))
+	return nil
+}
+
+func runImportProfiles(importPath string, args []string) error {
+	force := false
+	for _, arg := range args {
+		if arg != "--force" {
+			return fmt.Errorf("unknown flag: %s", arg)
+		}
+		force = true
+	}
+	profilesDir, err := defaultProfilesDir()
+	if err != nil {
+		return fmt.Errorf("could not determine profiles directory: %w", err)
+	}
+	data, err := os.ReadFile(importPath)
+	if err != nil {
+		return fmt.Errorf("could not read import file: %w", err)
+	}
+	set, err := decodeProfileSet(data)
+	if err != nil {
+		return err
+	}
+	result, err := importProfileSet(profilesDir, set, force)
+	if err != nil {
+		return fmt.Errorf("could not import profiles: %w", err)
+	}
+	for _, name := range result.Imported {
+		fmt.Print(renderInlineStatus(styleSuccess.Render("✓"), "Imported "+name))
+	}
+	for _, name := range result.Skipped {
+		fmt.Print(renderInlineStatus(styleDimmed.Render("○"), "Skipped "+name+" (already exists, use --force to overwrite)"))
+	}
+	if len(result.Imported) == 0 && len(result.Skipped) == 0 {
+		fmt.Print(renderStatusDim("No profiles in bundle.") + "\n")
+	}
 	return nil
 }
 
