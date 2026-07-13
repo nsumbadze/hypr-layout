@@ -18,17 +18,36 @@ func renderPreview(layoutName string, lines []string) string {
 }
 
 // renderProfileList is used by `hypr-layout list`.
-func renderProfileList(profiles []string) string {
+func renderProfileList(profiles []profileSummary) string {
 	if len(profiles) == 0 {
 		return "\n  " + styleTitle.Render("Saved profiles") + "\n\n  " + styleDimmed.Render("No saved profiles.") + "\n\n"
 	}
 	var b strings.Builder
 	b.WriteString("\n  " + styleTitle.Render("Saved profiles") + "\n\n")
 	for _, p := range profiles {
-		b.WriteString("  " + styleAccent.Render("·") + "  " + styleBase.Render(p) + "\n")
+		b.WriteString("  " + styleAccent.Render("·") + "  " + styleBase.Render(p.Name))
+		if details := profileDetails(p.Meta); details != "" {
+			b.WriteString("  " + styleDimmed.Render(details))
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// profileDetails builds a one-line metadata summary for the profile list.
+func profileDetails(meta profileMetadata) string {
+	var parts []string
+	if meta.Direction != "" {
+		parts = append(parts, meta.Direction)
+	}
+	if len(meta.Monitors) > 0 {
+		parts = append(parts, strings.Join(meta.Monitors, ", "))
+	}
+	if !meta.SavedAt.IsZero() {
+		parts = append(parts, "saved "+meta.SavedAt.Local().Format("2006-01-02"))
+	}
+	return strings.Join(parts, "  ·  ")
 }
 
 // renderInlineStatus renders a status line for non-TUI flows.

@@ -529,12 +529,13 @@ func (m tuiModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		lines := m.configLines
+		meta := m.profileMetadata()
 		return m, func() tea.Msg {
 			dir, err := defaultProfilesDir()
 			if err != nil {
 				return profileSavedMsg{err: err}
 			}
-			return profileSavedMsg{err: saveProfile(dir, name, lines)}
+			return profileSavedMsg{err: saveProfile(dir, name, lines, meta)}
 		}
 	}
 	var cmd tea.Cmd
@@ -766,6 +767,23 @@ func (m tuiModel) bodyView() string {
 	default:
 		return ""
 	}
+}
+
+// profileMetadata captures how the current layout was produced for the
+// profile header: direction (or "mirror"), and the ordered monitors with
+// their chosen modes.
+func (m tuiModel) profileMetadata() profileMetadata {
+	meta := profileMetadata{
+		SavedAt:   time.Now(),
+		Direction: string(m.direction),
+	}
+	if m.mirrored {
+		meta.Direction = "mirror"
+	}
+	for _, cfg := range m.activeConfigs {
+		meta.Monitors = append(meta.Monitors, m.monitors[cfg.Index].Name+" "+formatMonitorMode(cfg.Mode))
+	}
+	return meta
 }
 
 // settingsMonitor returns the monitor whose settings are being edited.

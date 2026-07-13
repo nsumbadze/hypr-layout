@@ -52,7 +52,7 @@ func runListProfiles() error {
 	if err != nil {
 		return fmt.Errorf("could not determine profiles directory: %w", err)
 	}
-	profiles, err := listProfiles(profilesDir)
+	profiles, err := listProfileSummaries(profilesDir)
 	if err != nil {
 		return fmt.Errorf("could not list profiles: %w", err)
 	}
