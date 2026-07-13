@@ -24,6 +24,55 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 	return options, nil
 }
 
+type quickOptions struct {
+	commandOptions
+	Direction layoutDirection
+	Order     string
+}
+
+func parseQuickOptions(args []string) (quickOptions, error) {
+	options := quickOptions{Direction: leftToRight}
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--yes":
+			options.AutoYes = true
+		case "--no-reload":
+			options.NoReload = true
+		case "--direction":
+			value, next, err := flagValue(args, i)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			direction, err := parseDirectionName(value)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			options.Direction = direction
+			i = next
+		case "--order":
+			value, next, err := flagValue(args, i)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			options.Order = value
+			i = next
+		default:
+			return quickOptions{}, fmt.Errorf("unknown flag: %s", args[i])
+		}
+	}
+
+	return options, nil
+}
+
+func flagValue(args []string, i int) (string, int, error) {
+	if i+1 >= len(args) {
+		return "", i, fmt.Errorf("%s requires a value", args[i])
+	}
+
+	return args[i+1], i + 1, nil
+}
+
 func quickPresetLayoutID(preset string) (int, error) {
 	switch preset {
 	case "laptop":

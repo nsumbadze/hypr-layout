@@ -68,6 +68,81 @@ func TestBestMonitorModeFallsBackToCurrent(t *testing.T) {
 	}
 }
 
+func TestParseQuickOptions(t *testing.T) {
+	got, err := parseQuickOptions([]string{"--yes", "--direction", "top-bottom", "--order", "2 1"})
+	if err != nil {
+		t.Fatalf("parseQuickOptions returned error: %v", err)
+	}
+
+	if !got.AutoYes || got.NoReload {
+		t.Fatalf("unexpected shared options: %#v", got)
+	}
+
+	if got.Direction != topToBottom {
+		t.Fatalf("unexpected direction: %q", got.Direction)
+	}
+
+	if got.Order != "2 1" {
+		t.Fatalf("unexpected order: %q", got.Order)
+	}
+}
+
+func TestParseQuickOptionsDefaultsToLeftRight(t *testing.T) {
+	got, err := parseQuickOptions(nil)
+	if err != nil {
+		t.Fatalf("parseQuickOptions returned error: %v", err)
+	}
+
+	if got.Direction != leftToRight {
+		t.Fatalf("unexpected default direction: %q", got.Direction)
+	}
+}
+
+func TestParseQuickOptionsErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "unknown flag", args: []string{"--bad"}},
+		{name: "missing direction value", args: []string{"--direction"}},
+		{name: "invalid direction value", args: []string{"--direction", "diagonal"}},
+		{name: "missing order value", args: []string{"--order"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := parseQuickOptions(tt.args); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestParseDirectionName(t *testing.T) {
+	tests := []struct {
+		value string
+		want  layoutDirection
+	}{
+		{value: "left-right", want: leftToRight},
+		{value: "right-left", want: rightToLeft},
+		{value: "top-bottom", want: topToBottom},
+		{value: "bottom-top", want: bottomToTop},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got, err := parseDirectionName(tt.value)
+			if err != nil {
+				t.Fatalf("parseDirectionName returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected direction: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseCommandOptions(t *testing.T) {
 	got, err := parseCommandOptions([]string{"--yes", "--no-reload"})
 	if err != nil {

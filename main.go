@@ -27,7 +27,7 @@ func run(args []string) error {
 	case len(args) >= 2 && args[0] == "quick":
 		return runQuickPreset(args[1], args[2:])
 	default:
-		return fmt.Errorf("usage: hypr-layout [list | apply <profile-name> [--yes] [--no-reload] | quick <preset> [--yes] [--no-reload]]")
+		return fmt.Errorf("usage: hypr-layout [list | apply <profile-name> [--yes] [--no-reload] | quick <preset> [--yes] [--no-reload] [--direction <dir>] [--order <indices>]]")
 	}
 }
 
@@ -78,7 +78,7 @@ func runApplyProfile(profileName string, args []string) error {
 }
 
 func runQuickPreset(preset string, args []string) error {
-	options, err := parseCommandOptions(args)
+	options, err := parseQuickOptions(args)
 	if err != nil {
 		return err
 	}
@@ -98,9 +98,15 @@ func runQuickPreset(preset string, args []string) error {
 		return fmt.Errorf("could not determine active monitors: %w", err)
 	}
 	activeConfigs := buildActiveMonitorConfigs(monitors, activeIndexes, autoSelectMonitorModes(monitors, activeIndexes))
-	lines := renderPositionedConfigLines(monitors, activeConfigs, leftToRight)
+	if options.Order != "" {
+		activeConfigs, err = reorderActiveConfigs(options.Order, activeConfigs)
+		if err != nil {
+			return fmt.Errorf("invalid --order: %w", err)
+		}
+	}
+	lines := renderPositionedConfigLines(monitors, activeConfigs, options.Direction)
 	fmt.Print(renderPreview("Quick: "+preset, lines))
-	return applyPreviewFlow(lines, options)
+	return applyPreviewFlow(lines, options.commandOptions)
 }
 
 func detectMonitors() ([]monitor, error) {

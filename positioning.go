@@ -62,6 +62,23 @@ func parseLayoutDirection(input string) (layoutDirection, error) {
 	}
 }
 
+// parseDirectionName parses the flag-facing direction names used by
+// `quick --direction`.
+func parseDirectionName(value string) (layoutDirection, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "left-right":
+		return leftToRight, nil
+	case "right-left":
+		return rightToLeft, nil
+	case "top-bottom":
+		return topToBottom, nil
+	case "bottom-top":
+		return bottomToTop, nil
+	default:
+		return "", fmt.Errorf("unknown direction %q (use left-right, right-left, top-bottom, or bottom-top)", value)
+	}
+}
+
 func promptMonitorOrder(r io.Reader, w io.Writer, monitors []monitor, activeConfigs []activeMonitorConfig) ([]activeMonitorConfig, error) {
 	reader := bufio.NewReader(r)
 
