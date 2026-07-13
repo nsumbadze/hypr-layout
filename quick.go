@@ -28,10 +28,11 @@ type quickOptions struct {
 	commandOptions
 	Direction layoutDirection
 	Order     string
+	Mode      modeStrategy
 }
 
 func parseQuickOptions(args []string) (quickOptions, error) {
-	options := quickOptions{Direction: leftToRight}
+	options := quickOptions{Direction: leftToRight, Mode: modeStrategyBest}
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -56,6 +57,17 @@ func parseQuickOptions(args []string) (quickOptions, error) {
 				return quickOptions{}, err
 			}
 			options.Order = value
+			i = next
+		case "--mode":
+			value, next, err := flagValue(args, i)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			strategy, err := parseModeStrategy(value)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			options.Mode = strategy
 			i = next
 		default:
 			return quickOptions{}, fmt.Errorf("unknown flag: %s", args[i])
@@ -88,11 +100,11 @@ func quickPresetLayoutID(preset string) (int, error) {
 	}
 }
 
-func autoSelectMonitorModes(monitors []monitor, activeIndexes []int) map[int]monitorMode {
+func autoSelectMonitorModes(monitors []monitor, activeIndexes []int, strategy modeStrategy) map[int]monitorMode {
 	selected := make(map[int]monitorMode, len(activeIndexes))
 
 	for _, idx := range activeIndexes {
-		selected[idx] = bestMonitorMode(monitors[idx])
+		selected[idx] = resolveModeStrategy(monitors[idx], strategy)
 	}
 
 	return selected

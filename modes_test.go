@@ -61,6 +61,86 @@ func TestPromptMonitorModesUsesDefaultOnEnter(t *testing.T) {
 	}
 }
 
+func TestParseModeStrategy(t *testing.T) {
+	tests := []struct {
+		value   string
+		want    modeStrategy
+		wantErr bool
+	}{
+		{value: "current", want: modeStrategyCurrent},
+		{value: "best", want: modeStrategyBest},
+		{value: "preferred", want: modeStrategyPreferred},
+		{value: "highres", want: modeStrategyHighres},
+		{value: "highrr", want: modeStrategyHighrr},
+		{value: "fastest", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got, err := parseModeStrategy(tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("parseModeStrategy returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected strategy: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveModeStrategy(t *testing.T) {
+	mon := monitor{
+		Width:       1920,
+		Height:      1080,
+		RefreshRate: 60,
+		AvailableModes: []string{
+			"2560x1440@60.00Hz",
+			"1920x1080@144.00Hz",
+			"2560x1440@120.00Hz",
+		},
+	}
+
+	tests := []struct {
+		strategy modeStrategy
+		want     monitorMode
+	}{
+		{strategy: modeStrategyCurrent, want: monitorMode{Width: 1920, Height: 1080, RefreshRate: 60}},
+		{strategy: modeStrategyPreferred, want: monitorMode{Width: 2560, Height: 1440, RefreshRate: 60}},
+		{strategy: modeStrategyHighres, want: monitorMode{Width: 2560, Height: 1440, RefreshRate: 120}},
+		{strategy: modeStrategyHighrr, want: monitorMode{Width: 1920, Height: 1080, RefreshRate: 144}},
+		{strategy: modeStrategyBest, want: monitorMode{Width: 1920, Height: 1080, RefreshRate: 144}},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.strategy), func(t *testing.T) {
+			got := resolveModeStrategy(mon, tt.strategy)
+			if got != tt.want {
+				t.Fatalf("unexpected mode: got %#v want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveModeStrategyFallsBackToCurrent(t *testing.T) {
+	mon := monitor{Width: 2880, Height: 1800, RefreshRate: 120}
+	current := monitorMode{Width: 2880, Height: 1800, RefreshRate: 120}
+
+	for _, strategy := range []modeStrategy{modeStrategyPreferred, modeStrategyHighres, modeStrategyHighrr} {
+		if got := resolveModeStrategy(mon, strategy); got != current {
+			t.Fatalf("strategy %q: unexpected fallback mode: got %#v want %#v", strategy, got, current)
+		}
+	}
+}
+
 func TestAvailableMonitorModesFallsBackToCurrentViaRenderer(t *testing.T) {
 	monitors := []monitor{
 		{

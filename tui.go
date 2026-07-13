@@ -61,11 +61,17 @@ func (i layoutListItem) Description() string { return "" }
 func (i layoutListItem) FilterValue() string { return i.opt.Name }
 
 type modeListItem struct {
-	mode    monitorMode
-	current bool
+	mode monitorMode
+	// shortcut labels a strategy entry (Preferred / Highest resolution /
+	// Highest refresh) that resolves to a concrete mode; empty for plain modes.
+	shortcut string
+	current  bool
 }
 
 func (i modeListItem) Title() string {
+	if i.shortcut != "" {
+		return i.shortcut + "  " + styleDimmed.Render(formatMonitorMode(i.mode))
+	}
 	s := formatMonitorMode(i.mode)
 	if i.current {
 		return s + "  " + styleDimmed.Render("current")
@@ -73,7 +79,7 @@ func (i modeListItem) Title() string {
 	return s
 }
 func (i modeListItem) Description() string { return "" }
-func (i modeListItem) FilterValue() string { return formatMonitorMode(i.mode) }
+func (i modeListItem) FilterValue() string { return i.shortcut + formatMonitorMode(i.mode) }
 
 type dirListItem struct {
 	name string
@@ -961,9 +967,18 @@ func (m tuiModel) makeLayoutList() list.Model {
 	return m.newStyledList(items)
 }
 
+// modeShortcutCount is the number of strategy shortcut entries prepended to
+// every TUI mode list; modeListIdx offsets restored cursors by this amount.
+const modeShortcutCount = 3
+
 func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 	curr := currentMonitorMode(mon)
-	items := make([]list.Item, 0, len(modes))
+	items := make([]list.Item, 0, modeShortcutCount+len(modes))
+	items = append(items,
+		modeListItem{shortcut: "Preferred", mode: resolveModeStrategy(mon, modeStrategyPreferred)},
+		modeListItem{shortcut: "Highest resolution", mode: resolveModeStrategy(mon, modeStrategyHighres)},
+		modeListItem{shortcut: "Highest refresh", mode: resolveModeStrategy(mon, modeStrategyHighrr)},
+	)
 	for _, mode := range modes {
 		isCurr := mode.Width == curr.Width && mode.Height == curr.Height && mode.RefreshRate == curr.RefreshRate
 		items = append(items, modeListItem{mode: mode, current: isCurr})
@@ -1032,12 +1047,12 @@ func directionListIdx(d layoutDirection) int {
 	return 0 // leftToRight
 }
 
-// modeListIdx returns the list index of the given mode in a slice of modes,
-// or 0 if not found.
+// modeListIdx returns the list index of the given mode in a mode list built by
+// makeModeList (offset past the strategy shortcuts), or 0 if not found.
 func modeListIdx(selected monitorMode, modes []monitorMode) int {
 	for i, m := range modes {
 		if m.Width == selected.Width && m.Height == selected.Height && m.RefreshRate == selected.RefreshRate {
-			return i
+			return modeShortcutCount + i
 		}
 	}
 	return 0
