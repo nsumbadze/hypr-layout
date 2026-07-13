@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 type commandOptions struct {
 	AutoYes  bool
@@ -24,15 +27,26 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 	return options, nil
 }
 
+// keepCurrentSetting marks a transform/vrr option as "not overridden": each
+// monitor keeps whatever value Hyprland currently reports for it.
+const keepCurrentSetting = -1
+
 type quickOptions struct {
 	commandOptions
 	Direction layoutDirection
 	Order     string
 	Mode      modeStrategy
+	Transform int
+	VRR       int
 }
 
 func parseQuickOptions(args []string) (quickOptions, error) {
-	options := quickOptions{Direction: leftToRight, Mode: modeStrategyBest}
+	options := quickOptions{
+		Direction: leftToRight,
+		Mode:      modeStrategyBest,
+		Transform: keepCurrentSetting,
+		VRR:       keepCurrentSetting,
+	}
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -69,6 +83,28 @@ func parseQuickOptions(args []string) (quickOptions, error) {
 			}
 			options.Mode = strategy
 			i = next
+		case "--transform":
+			value, next, err := flagValue(args, i)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			transform, err := parseBoundedInt(value, 0, 7, "--transform")
+			if err != nil {
+				return quickOptions{}, err
+			}
+			options.Transform = transform
+			i = next
+		case "--vrr":
+			value, next, err := flagValue(args, i)
+			if err != nil {
+				return quickOptions{}, err
+			}
+			vrr, err := parseBoundedInt(value, 0, 2, "--vrr")
+			if err != nil {
+				return quickOptions{}, err
+			}
+			options.VRR = vrr
+			i = next
 		default:
 			return quickOptions{}, fmt.Errorf("unknown flag: %s", args[i])
 		}
@@ -83,6 +119,28 @@ func flagValue(args []string, i int) (string, int, error) {
 	}
 
 	return args[i+1], i + 1, nil
+}
+
+func parseBoundedInt(value string, min, max int, flag string) (int, error) {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < min || parsed > max {
+		return 0, fmt.Errorf("%s must be a number between %d and %d", flag, min, max)
+	}
+
+	return parsed, nil
+}
+
+// applyDisplayOverrides applies global --transform/--vrr overrides to every
+// active monitor; keepCurrentSetting leaves the detected value untouched.
+func applyDisplayOverrides(configs []activeMonitorConfig, transform, vrr int) {
+	for i := range configs {
+		if transform != keepCurrentSetting {
+			configs[i].Transform = transform
+		}
+		if vrr != keepCurrentSetting {
+			configs[i].VRR = vrr
+		}
+	}
 }
 
 func quickPresetLayoutID(preset string) (int, error) {

@@ -20,6 +20,34 @@ const (
 type activeMonitorConfig struct {
 	Index int
 	Mode  monitorMode
+	// Transform is a Hyprland transform value (0-7); odd values rotate 90°/270°
+	// and swap the monitor's effective width and height for positioning.
+	Transform int
+	// VRR is a Hyprland vrr value: 0 off, 1 on, 2 fullscreen only.
+	VRR int
+}
+
+// effectiveModeSize returns the layout dimensions of a mode after the given
+// transform; 90°/270° rotations (odd transforms) swap width and height.
+func effectiveModeSize(mode monitorMode, transform int) (int, int) {
+	if transform%2 == 1 {
+		return mode.Height, mode.Width
+	}
+
+	return mode.Width, mode.Height
+}
+
+// appendKeywordPairs adds non-default transform and vrr keyword pairs to a
+// generated monitor line.
+func appendKeywordPairs(line string, config activeMonitorConfig) string {
+	if config.Transform != 0 {
+		line += fmt.Sprintf(", transform, %d", config.Transform)
+	}
+	if config.VRR != 0 {
+		line += fmt.Sprintf(", vrr, %d", config.VRR)
+	}
+
+	return line
 }
 
 func promptLayoutDirection(r io.Reader, w io.Writer) (layoutDirection, error) {
@@ -138,16 +166,24 @@ func buildActiveMonitorConfigs(monitors []monitor, activeIndexes []int, selected
 	configs := make([]activeMonitorConfig, 0, len(activeIndexes))
 
 	for _, idx := range activeIndexes {
-		mode := currentMonitorMode(monitors[idx])
+		mon := monitors[idx]
+		mode := currentMonitorMode(mon)
 		if selectedModes != nil {
 			if selectedMode, ok := selectedModes[idx]; ok {
 				mode = selectedMode
 			}
 		}
 
+		vrr := 0
+		if mon.VRR {
+			vrr = 1
+		}
+
 		configs = append(configs, activeMonitorConfig{
-			Index: idx,
-			Mode:  mode,
+			Index:     idx,
+			Mode:      mode,
+			Transform: mon.Transform,
+			VRR:       vrr,
 		})
 	}
 
@@ -172,6 +208,7 @@ func renderPositionedConfigLines(monitors []monitor, activeConfigs []activeMonit
 	for i, config := range activeConfigs {
 		mon := monitors[config.Index]
 		activeSet[config.Index] = struct{}{}
+		effWidth, effHeight := effectiveModeSize(config.Mode, config.Transform)
 
 		// right-to-left and bottom-to-top subtract the current monitor's
 		// dimension before placing so that monitor[0] lands at 0x0 and
@@ -179,26 +216,27 @@ func renderPositionedConfigLines(monitors []monitor, activeConfigs []activeMonit
 		if i > 0 {
 			switch direction {
 			case rightToLeft:
-				positionX -= config.Mode.Width
+				positionX -= effWidth
 			case bottomToTop:
-				positionY -= config.Mode.Height
+				positionY -= effHeight
 			}
 		}
 
-		lines = append(lines, fmt.Sprintf(
+		line := fmt.Sprintf(
 			"monitor = %s, %s, %dx%d, %s",
 			mon.Name,
 			formatMonitorMode(config.Mode),
 			positionX,
 			positionY,
 			formatFloat(mon.Scale),
-		))
+		)
+		lines = append(lines, appendKeywordPairs(line, config))
 
 		switch direction {
 		case leftToRight:
-			positionX += config.Mode.Width
+			positionX += effWidth
 		case topToBottom:
-			positionY += config.Mode.Height
+			positionY += effHeight
 		}
 	}
 
@@ -228,12 +266,13 @@ func renderMirroredConfigLines(monitors []monitor, activeConfigs []activeMonitor
 			continue
 		}
 
-		lines = append(lines, fmt.Sprintf(
+		line := fmt.Sprintf(
 			"monitor = %s, %s, 0x0, %s",
 			sourceName,
 			formatMonitorMode(config.Mode),
 			formatFloat(monitors[config.Index].Scale),
-		))
+		)
+		lines = append(lines, appendKeywordPairs(line, config))
 	}
 
 	for _, config := range activeConfigs {
@@ -241,13 +280,14 @@ func renderMirroredConfigLines(monitors []monitor, activeConfigs []activeMonitor
 			continue
 		}
 
-		lines = append(lines, fmt.Sprintf(
+		line := fmt.Sprintf(
 			"monitor = %s, %s, 0x0, %s, mirror, %s",
 			monitors[config.Index].Name,
 			formatMonitorMode(config.Mode),
 			formatFloat(monitors[config.Index].Scale),
 			sourceName,
-		))
+		)
+		lines = append(lines, appendKeywordPairs(line, config))
 	}
 
 	for idx, mon := range monitors {

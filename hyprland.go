@@ -16,6 +16,8 @@ type monitor struct {
 	X              int      `json:"x"`
 	Y              int      `json:"y"`
 	Scale          float64  `json:"scale"`
+	Transform      int      `json:"transform"`
+	VRR            bool     `json:"vrr"`
 	Focused        bool     `json:"focused"`
 	AvailableModes []string `json:"availableModes"`
 }

@@ -112,6 +112,8 @@ func renderMonitorOrderPrompt(monitors []monitor, activeConfigs []activeMonitorC
 type layoutPreviewEntry struct {
 	name   string
 	mode   monitorMode
+	width  int // effective pixel width after transform
+	height int // effective pixel height after transform
 	pixelX int
 	pixelY int
 }
@@ -165,28 +167,31 @@ func buildLayoutEntries(monitors []monitor, configs []activeMonitorConfig, direc
 
 	for i, cfg := range configs {
 		mon := monitors[cfg.Index]
+		effWidth, effHeight := effectiveModeSize(cfg.Mode, cfg.Transform)
 
 		if i > 0 {
 			switch direction {
 			case rightToLeft:
-				posX -= cfg.Mode.Width
+				posX -= effWidth
 			case bottomToTop:
-				posY -= cfg.Mode.Height
+				posY -= effHeight
 			}
 		}
 
 		entries[i] = layoutPreviewEntry{
 			name:   mon.Name,
 			mode:   cfg.Mode,
+			width:  effWidth,
+			height: effHeight,
 			pixelX: posX,
 			pixelY: posY,
 		}
 
 		switch direction {
 		case leftToRight:
-			posX += cfg.Mode.Width
+			posX += effWidth
 		case topToBottom:
-			posY += cfg.Mode.Height
+			posY += effHeight
 		}
 	}
 	return entries
@@ -202,7 +207,7 @@ func renderHorizPreview(entries []layoutPreviewEntry, availWidth int) string {
 	n := len(entries)
 	totalPxW := 0
 	for _, e := range entries {
-		totalPxW += e.mode.Width
+		totalPxW += e.width
 	}
 	if totalPxW == 0 {
 		return ""
@@ -217,7 +222,7 @@ func renderHorizPreview(entries []layoutPreviewEntry, availWidth int) string {
 
 	boxes := make([]string, n)
 	for i, e := range entries {
-		totalBoxW := (e.mode.Width * usableW) / totalPxW
+		totalBoxW := (e.width * usableW) / totalPxW
 		if totalBoxW < minPerBox {
 			totalBoxW = minPerBox
 		}
@@ -246,9 +251,9 @@ func renderVertPreview(entries []layoutPreviewEntry, availWidth int) string {
 	totalPxH := 0
 	maxPxW := 0
 	for _, e := range entries {
-		totalPxH += e.mode.Height
-		if e.mode.Width > maxPxW {
-			maxPxW = e.mode.Width
+		totalPxH += e.height
+		if e.width > maxPxW {
+			maxPxW = e.width
 		}
 	}
 	if totalPxH == 0 || maxPxW == 0 {
@@ -263,12 +268,12 @@ func renderVertPreview(entries []layoutPreviewEntry, availWidth int) string {
 	boxes := make([]string, n)
 	for i, e := range entries {
 		// Scale height proportionally to monitor height.
-		boxH := (e.mode.Height * maxTotalH) / totalPxH
+		boxH := (e.height * maxTotalH) / totalPxH
 		if boxH < minBoxH {
 			boxH = minBoxH
 		}
 		// Scale width relative to the widest monitor in this layout.
-		innerW := (e.mode.Width * maxInnerW) / maxPxW
+		innerW := (e.width * maxInnerW) / maxPxW
 		if innerW < 12 {
 			innerW = 12
 		}

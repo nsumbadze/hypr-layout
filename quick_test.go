@@ -98,6 +98,45 @@ func TestParseQuickOptionsDefaultsToLeftRight(t *testing.T) {
 	}
 }
 
+func TestParseQuickOptionsTransformAndVRR(t *testing.T) {
+	got, err := parseQuickOptions([]string{"--transform", "1", "--vrr", "2"})
+	if err != nil {
+		t.Fatalf("parseQuickOptions returned error: %v", err)
+	}
+
+	if got.Transform != 1 || got.VRR != 2 {
+		t.Fatalf("unexpected settings: %#v", got)
+	}
+}
+
+func TestParseQuickOptionsKeepsCurrentSettingsByDefault(t *testing.T) {
+	got, err := parseQuickOptions(nil)
+	if err != nil {
+		t.Fatalf("parseQuickOptions returned error: %v", err)
+	}
+
+	if got.Transform != keepCurrentSetting || got.VRR != keepCurrentSetting {
+		t.Fatalf("unexpected default settings: %#v", got)
+	}
+}
+
+func TestApplyDisplayOverrides(t *testing.T) {
+	configs := []activeMonitorConfig{
+		{Index: 0, Transform: 3, VRR: 1},
+		{Index: 1},
+	}
+
+	applyDisplayOverrides(configs, 1, keepCurrentSetting)
+
+	if configs[0].Transform != 1 || configs[1].Transform != 1 {
+		t.Fatalf("transform override not applied: %#v", configs)
+	}
+
+	if configs[0].VRR != 1 || configs[1].VRR != 0 {
+		t.Fatalf("vrr should have been kept: %#v", configs)
+	}
+}
+
 func TestParseQuickOptionsErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -107,6 +146,9 @@ func TestParseQuickOptionsErrors(t *testing.T) {
 		{name: "missing direction value", args: []string{"--direction"}},
 		{name: "invalid direction value", args: []string{"--direction", "diagonal"}},
 		{name: "missing order value", args: []string{"--order"}},
+		{name: "transform out of range", args: []string{"--transform", "8"}},
+		{name: "transform not a number", args: []string{"--transform", "left"}},
+		{name: "vrr out of range", args: []string{"--vrr", "3"}},
 	}
 
 	for _, tt := range tests {

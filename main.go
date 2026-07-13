@@ -98,6 +98,7 @@ func runQuickPreset(preset string, args []string) error {
 		return fmt.Errorf("could not determine active monitors: %w", err)
 	}
 	activeConfigs := buildActiveMonitorConfigs(monitors, activeIndexes, autoSelectMonitorModes(monitors, activeIndexes, options.Mode))
+	applyDisplayOverrides(activeConfigs, options.Transform, options.VRR)
 	if options.Order != "" {
 		activeConfigs, err = reorderActiveConfigs(options.Order, activeConfigs)
 		if err != nil {

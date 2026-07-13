@@ -151,6 +151,58 @@ func TestRenderPositionedConfigLinesBottomToTopThreeMonitors(t *testing.T) {
 	}
 }
 
+func TestRenderPositionedConfigLinesEmitsTransformAndVRR(t *testing.T) {
+	monitors := []monitor{
+		{Name: "DP-1", Scale: 1},
+		{Name: "DP-2", Scale: 1},
+	}
+	// DP-1 is rotated 90°: its effective width becomes its height (1440),
+	// so DP-2 must start at x=1440.
+	activeConfigs := []activeMonitorConfig{
+		{Index: 0, Mode: monitorMode{Width: 2560, Height: 1440, RefreshRate: 165}, Transform: 1, VRR: 1},
+		{Index: 1, Mode: monitorMode{Width: 1920, Height: 1080, RefreshRate: 60}},
+	}
+
+	got := renderPositionedConfigLines(monitors, activeConfigs, leftToRight)
+	want := []string{
+		"monitor = DP-1, 2560x1440@165, 0x0, 1, transform, 1, vrr, 1",
+		"monitor = DP-2, 1920x1080@60, 1440x0, 1",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("transform/vrr:\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestEffectiveModeSize(t *testing.T) {
+	mode := monitorMode{Width: 2560, Height: 1440}
+
+	for transform, wantSwap := range map[int]bool{0: false, 1: true, 2: false, 3: true, 4: false, 5: true, 6: false, 7: true} {
+		w, h := effectiveModeSize(mode, transform)
+		if wantSwap && (w != 1440 || h != 2560) {
+			t.Fatalf("transform %d: expected swapped size, got %dx%d", transform, w, h)
+		}
+		if !wantSwap && (w != 2560 || h != 1440) {
+			t.Fatalf("transform %d: expected original size, got %dx%d", transform, w, h)
+		}
+	}
+}
+
+func TestBuildActiveMonitorConfigsPreservesTransformAndVRR(t *testing.T) {
+	monitors := []monitor{
+		{Name: "DP-1", Width: 2560, Height: 1440, RefreshRate: 165, Transform: 3, VRR: true},
+	}
+
+	configs := buildActiveMonitorConfigs(monitors, []int{0}, nil)
+	if len(configs) != 1 {
+		t.Fatalf("unexpected config count: %d", len(configs))
+	}
+
+	if configs[0].Transform != 3 || configs[0].VRR != 1 {
+		t.Fatalf("unexpected settings: %#v", configs[0])
+	}
+}
+
 // ── renderMirroredConfigLines ─────────────────────────────────────────────────
 
 func TestRenderMirroredConfigLines(t *testing.T) {

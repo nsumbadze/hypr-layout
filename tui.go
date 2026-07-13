@@ -23,6 +23,9 @@ const (
 	tuiDetecting tuiState = iota
 	tuiLayoutSelect
 	tuiModeSelect
+	tuiSettingsConfirm
+	tuiTransformSelect
+	tuiVRRSelect
 	tuiDirectionSelect
 	tuiOrderInput
 	tuiPreview
@@ -90,6 +93,23 @@ func (i dirListItem) Title() string       { return i.name }
 func (i dirListItem) Description() string { return "" }
 func (i dirListItem) FilterValue() string { return i.name }
 
+// settingListItem is a generic labelled integer choice used by the transform
+// and VRR selection screens.
+type settingListItem struct {
+	label   string
+	value   int
+	current bool
+}
+
+func (i settingListItem) Title() string {
+	if i.current {
+		return i.label + "  " + styleDimmed.Render("current")
+	}
+	return i.label
+}
+func (i settingListItem) Description() string { return "" }
+func (i settingListItem) FilterValue() string { return i.label }
+
 // ── key map ───────────────────────────────────────────────────────────────────
 
 type tuiKeyMap struct {
@@ -120,15 +140,16 @@ type tuiModel struct {
 	height int
 
 	// pipeline data
-	monitors       []monitor
-	activeIndexes  []int
-	selectedModes  map[int]monitorMode
-	direction      layoutDirection
-	activeConfigs  []activeMonitorConfig
-	configLines    []string
-	applyResult    applyResult
-	currentModeIdx int
-	mirrored       bool
+	monitors           []monitor
+	activeIndexes      []int
+	selectedModes      map[int]monitorMode
+	direction          layoutDirection
+	activeConfigs      []activeMonitorConfig
+	configLines        []string
+	applyResult        applyResult
+	currentModeIdx     int
+	currentSettingsIdx int
+	mirrored           bool
 
 	// components
 	spinner   spinner.Model
@@ -260,6 +281,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLayoutSelect(msg)
 	case tuiModeSelect:
 		return m.updateModeSelect(msg)
+	case tuiSettingsConfirm:
+		return m.updateSettingsConfirm(msg)
+	case tuiTransformSelect:
+		return m.updateTransformSelect(msg)
+	case tuiVRRSelect:
+		return m.updateVRRSelect(msg)
 	case tuiDirectionSelect:
 		return m.updateDirectionSelect(msg)
 	case tuiOrderInput:
@@ -326,10 +353,28 @@ func (m tuiModel) advanceModeSelect() (tuiModel, tea.Cmd) {
 		m.list = m.makeModeList(mon, modes)
 		return m, nil
 	}
-	// Build configs now so the live preview has data on first arrival,
-	// not only after the user has confirmed a direction once.
+	// Build configs now so downstream screens (settings, live direction
+	// preview) have data on first arrival.
 	m.activeConfigs = buildActiveMonitorConfigs(m.monitors, m.activeIndexes, m.selectedModes)
-	// Mirrored layouts have no direction or order — go straight to preview.
+	m.state = tuiSettingsConfirm
+	return m, nil
+}
+
+// advanceSettings shows the transform screen for the current monitor, or
+// finishes the settings phase when every active monitor has been visited.
+func (m tuiModel) advanceSettings() (tuiModel, tea.Cmd) {
+	if m.currentSettingsIdx >= len(m.activeConfigs) {
+		return m.finishSettings()
+	}
+	m.state = tuiTransformSelect
+	m.list = m.makeTransformList(m.activeConfigs[m.currentSettingsIdx].Transform)
+	return m, nil
+}
+
+// finishSettings routes to the next wizard phase: direction selection for
+// positioned layouts, or straight to preview for mirrored layouts (which have
+// no direction or order).
+func (m tuiModel) finishSettings() (tuiModel, tea.Cmd) {
 	if m.mirrored {
 		m.configLines = renderMirroredConfigLines(m.monitors, m.activeConfigs, mirrorSourceIndex(m.monitors, m.activeIndexes))
 		m.state = tuiPreview
@@ -356,6 +401,52 @@ func (m tuiModel) updateModeSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m tuiModel) updateSettingsConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch {
+	case key.Matches(km, tuiKeys.Yes):
+		m.currentSettingsIdx = 0
+		return m.advanceSettings()
+	case key.Matches(km, tuiKeys.No):
+		return m.finishSettings()
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateTransformSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
+		item, ok := m.list.SelectedItem().(settingListItem)
+		if !ok {
+			return m, nil
+		}
+		m.activeConfigs[m.currentSettingsIdx].Transform = item.value
+		m.state = tuiVRRSelect
+		m.list = m.makeVRRList(m.activeConfigs[m.currentSettingsIdx].VRR)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m tuiModel) updateVRRSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
+		item, ok := m.list.SelectedItem().(settingListItem)
+		if !ok {
+			return m, nil
+		}
+		m.activeConfigs[m.currentSettingsIdx].VRR = item.value
+		m.currentSettingsIdx++
+		return m.advanceSettings()
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
 func (m tuiModel) updateDirectionSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
 		item, ok := m.list.SelectedItem().(dirListItem)
@@ -363,7 +454,6 @@ func (m tuiModel) updateDirectionSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.direction = item.dir
-		m.activeConfigs = buildActiveMonitorConfigs(m.monitors, m.activeIndexes, m.selectedModes)
 		m.state = tuiOrderInput
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = orderPlaceholder(m.activeConfigs)
@@ -564,6 +654,18 @@ func (m tuiModel) stepLabel() string {
 			return fmt.Sprintf("Mode for %s  (%d/%d)", mon.Name, m.currentModeIdx+1, len(m.activeIndexes))
 		}
 		return "Select mode"
+	case tuiSettingsConfirm:
+		return "Display settings?"
+	case tuiTransformSelect:
+		if mon, ok := m.settingsMonitor(); ok {
+			return fmt.Sprintf("Rotation for %s  (%d/%d)", mon.Name, m.currentSettingsIdx+1, len(m.activeConfigs))
+		}
+		return "Rotation"
+	case tuiVRRSelect:
+		if mon, ok := m.settingsMonitor(); ok {
+			return fmt.Sprintf("VRR for %s  (%d/%d)", mon.Name, m.currentSettingsIdx+1, len(m.activeConfigs))
+		}
+		return "VRR"
 	case tuiDirectionSelect:
 		return "Layout direction"
 	case tuiOrderInput:
@@ -599,13 +701,13 @@ func (m tuiModel) footerHints() string {
 	switch m.state {
 	case tuiLayoutSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + acc("q") + " quit"
-	case tuiModeSelect, tuiDirectionSelect:
+	case tuiModeSelect, tuiTransformSelect, tuiVRRSelect, tuiDirectionSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + back + sep + acc("q") + " quit"
 	case tuiOrderInput, tuiProfileName:
 		return acc("enter") + " confirm" + sep + back + sep + acc("q") + " quit"
 	case tuiPreview:
 		return dim("↑/↓") + " scroll" + sep + acc("y") + " save profile" + sep + acc("n") + " skip" + sep + back + sep + acc("q") + " quit"
-	case tuiSaveConfirm, tuiApplyConfirm:
+	case tuiSettingsConfirm, tuiSaveConfirm, tuiApplyConfirm:
 		return acc("y") + " yes" + sep + acc("n") + " no" + sep + back + sep + acc("q") + " quit"
 	case tuiReloadConfirm:
 		return acc("y") + " yes" + sep + acc("n") + " no" + sep + acc("q") + " quit"
@@ -633,6 +735,12 @@ func (m tuiModel) bodyView() string {
 			}
 		}
 		return m.listView(contentH, title)
+	case tuiSettingsConfirm:
+		return m.yesNoView(contentH, "Adjust display settings (rotation, VRR)?")
+	case tuiTransformSelect:
+		return m.listView(contentH, m.settingsScreenTitle("Select rotation"))
+	case tuiVRRSelect:
+		return m.listView(contentH, m.settingsScreenTitle("Select VRR"))
 	case tuiDirectionSelect:
 		return m.directionSelectView(contentH)
 	case tuiOrderInput:
@@ -658,6 +766,28 @@ func (m tuiModel) bodyView() string {
 	default:
 		return ""
 	}
+}
+
+// settingsMonitor returns the monitor whose settings are being edited.
+func (m tuiModel) settingsMonitor() (monitor, bool) {
+	if m.currentSettingsIdx < 0 || m.currentSettingsIdx >= len(m.activeConfigs) {
+		return monitor{}, false
+	}
+	return m.monitors[m.activeConfigs[m.currentSettingsIdx].Index], true
+}
+
+// settingsScreenTitle builds a "<prefix> for <monitor>  (i of n)" title for the
+// transform and VRR screens.
+func (m tuiModel) settingsScreenTitle(prefix string) string {
+	mon, ok := m.settingsMonitor()
+	if !ok {
+		return prefix
+	}
+	title := prefix + " for " + mon.Name
+	if len(m.activeConfigs) > 1 {
+		title += "  " + styleDimmed.Render(fmt.Sprintf("(%d of %d)", m.currentSettingsIdx+1, len(m.activeConfigs)))
+	}
+	return title
 }
 
 // ── body sub-views ────────────────────────────────────────────────────────────
@@ -834,7 +964,8 @@ func (m tuiModel) errView(h int) string {
 // or where there is no previous step (detecting, done, error) do not allow it.
 func backAllowed(s tuiState) bool {
 	switch s {
-	case tuiModeSelect, tuiDirectionSelect, tuiOrderInput,
+	case tuiModeSelect, tuiSettingsConfirm, tuiTransformSelect, tuiVRRSelect,
+		tuiDirectionSelect, tuiOrderInput,
 		tuiPreview, tuiSaveConfirm, tuiProfileName, tuiApplyConfirm:
 		return true
 	}
@@ -851,8 +982,27 @@ func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
 		}
 		return m.rewindModeSelect()
 
-	case tuiDirectionSelect:
+	case tuiSettingsConfirm:
 		return m.rewindToLastModeOrLayout()
+
+	case tuiTransformSelect:
+		if m.currentSettingsIdx == 0 {
+			m.state = tuiSettingsConfirm
+			return m, nil
+		}
+		m.currentSettingsIdx--
+		m.state = tuiVRRSelect
+		m.list = m.makeVRRList(m.activeConfigs[m.currentSettingsIdx].VRR)
+		return m, nil
+
+	case tuiVRRSelect:
+		m.state = tuiTransformSelect
+		m.list = m.makeTransformList(m.activeConfigs[m.currentSettingsIdx].Transform)
+		return m, nil
+
+	case tuiDirectionSelect:
+		m.state = tuiSettingsConfirm
+		return m, nil
 
 	case tuiOrderInput:
 		m.textInput.Blur()
@@ -864,7 +1014,8 @@ func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
 
 	case tuiPreview:
 		if m.mirrored {
-			return m.rewindToLastModeOrLayout()
+			m.state = tuiSettingsConfirm
+			return m, nil
 		}
 		m.state = tuiOrderInput
 		m.textInput.SetValue("")
@@ -949,7 +1100,7 @@ func (m tuiModel) resizeComponents() tuiModel {
 	// Only resize the list when it has been initialised; calling SetSize on a
 	// zero-value list.Model panics because its internal paginator is nil.
 	switch m.state {
-	case tuiLayoutSelect, tuiModeSelect:
+	case tuiLayoutSelect, tuiModeSelect, tuiTransformSelect, tuiVRRSelect:
 		m.list.SetSize(m.width-4, listH)
 	case tuiDirectionSelect:
 		// Direction list has exactly 4 fixed items. Keep it compact so the
@@ -996,6 +1147,39 @@ func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 		items = append(items, modeListItem{mode: mode, current: isCurr})
 	}
 	return m.newStyledList(items)
+}
+
+// hyprland transform values: 0-3 rotate counter-clockwise in 90° steps,
+// 4-7 are the same rotations of a flipped (mirrored) image.
+func (m tuiModel) makeTransformList(current int) list.Model {
+	labels := []string{
+		"Normal",
+		"90°",
+		"180°",
+		"270°",
+		"Flipped",
+		"Flipped + 90°",
+		"Flipped + 180°",
+		"Flipped + 270°",
+	}
+	items := make([]list.Item, 0, len(labels))
+	for value, label := range labels {
+		items = append(items, settingListItem{label: label, value: value, current: value == current})
+	}
+	l := m.newStyledList(items)
+	l.Select(current)
+	return l
+}
+
+func (m tuiModel) makeVRRList(current int) list.Model {
+	items := []list.Item{
+		settingListItem{label: "Off", value: 0, current: current == 0},
+		settingListItem{label: "On", value: 1, current: current == 1},
+		settingListItem{label: "Fullscreen only", value: 2, current: current == 2},
+	}
+	l := m.newStyledList(items)
+	l.Select(current)
+	return l
 }
 
 // directionListHeight is the fixed list height for the direction screen.
