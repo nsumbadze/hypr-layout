@@ -104,7 +104,12 @@ func runQuickPreset(preset string, args []string) error {
 			return fmt.Errorf("invalid --order: %w", err)
 		}
 	}
-	lines := renderPositionedConfigLines(monitors, activeConfigs, options.Direction)
+	var lines []string
+	if layoutID == layoutMirror {
+		lines = renderMirroredConfigLines(monitors, activeConfigs, mirrorSourceIndex(monitors, activeIndexes))
+	} else {
+		lines = renderPositionedConfigLines(monitors, activeConfigs, options.Direction)
+	}
 	fmt.Print(renderPreview("Quick: "+preset, lines))
 	return applyPreviewFlow(lines, options.commandOptions)
 }

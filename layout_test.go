@@ -51,6 +51,59 @@ func TestActiveIndexesForLayoutTripleHorizontalNeedsThreeMonitors(t *testing.T) 
 	}
 }
 
+func TestActiveIndexesForLayoutMirror(t *testing.T) {
+	monitors := []monitor{
+		{Name: "eDP-1"},
+		{Name: "DP-1"},
+	}
+
+	indexes, err := activeIndexesForLayout(monitors, layoutMirror)
+	if err != nil {
+		t.Fatalf("activeIndexesForLayout returned error: %v", err)
+	}
+
+	want := []int{0, 1}
+	if len(indexes) != len(want) {
+		t.Fatalf("unexpected index count: got %d want %d", len(indexes), len(want))
+	}
+
+	for i := range want {
+		if indexes[i] != want[i] {
+			t.Fatalf("unexpected indexes: got %#v want %#v", indexes, want)
+		}
+	}
+}
+
+func TestActiveIndexesForLayoutMirrorNeedsTwoMonitors(t *testing.T) {
+	monitors := []monitor{{Name: "eDP-1"}}
+
+	if _, err := activeIndexesForLayout(monitors, layoutMirror); err == nil {
+		t.Fatal("expected error for single monitor mirror")
+	}
+}
+
+func TestMirrorSourceIndexPrefersFocused(t *testing.T) {
+	monitors := []monitor{
+		{Name: "eDP-1"},
+		{Name: "DP-1", Focused: true},
+	}
+
+	if got := mirrorSourceIndex(monitors, []int{0, 1}); got != 1 {
+		t.Fatalf("unexpected source index: got %d want 1", got)
+	}
+}
+
+func TestMirrorSourceIndexFallsBackToFirstActive(t *testing.T) {
+	monitors := []monitor{
+		{Name: "eDP-1"},
+		{Name: "DP-1"},
+	}
+
+	if got := mirrorSourceIndex(monitors, []int{0, 1}); got != 0 {
+		t.Fatalf("unexpected source index: got %d want 0", got)
+	}
+}
+
 func TestParseConfirmation(t *testing.T) {
 	tests := []struct {
 		name    string

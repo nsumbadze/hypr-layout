@@ -88,13 +88,15 @@ func flagValue(args []string, i int) (string, int, error) {
 func quickPresetLayoutID(preset string) (int, error) {
 	switch preset {
 	case "laptop":
-		return 1, nil
+		return layoutLaptopOnly, nil
 	case "external":
-		return 2, nil
+		return layoutExternalOnly, nil
 	case "dual":
-		return 3, nil
+		return layoutDualHorizontal, nil
 	case "triple":
-		return 4, nil
+		return layoutTripleHorizontal, nil
+	case "mirror":
+		return layoutMirror, nil
 	default:
 		return 0, fmt.Errorf("unknown preset: %s", preset)
 	}

@@ -128,6 +128,7 @@ type tuiModel struct {
 	configLines    []string
 	applyResult    applyResult
 	currentModeIdx int
+	mirrored       bool
 
 	// components
 	spinner   spinner.Model
@@ -290,7 +291,7 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		if item.opt.ID == 5 {
+		if item.opt.ID == layoutQuit {
 			return m, tea.Quit
 		}
 		indexes, err := activeIndexesForLayout(m.monitors, item.opt.ID)
@@ -301,6 +302,7 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.activeIndexes = indexes
 		m.currentModeIdx = 0
+		m.mirrored = item.opt.ID == layoutMirror
 		return m.advanceModeSelect()
 	}
 	var cmd tea.Cmd
@@ -327,6 +329,13 @@ func (m tuiModel) advanceModeSelect() (tuiModel, tea.Cmd) {
 	// Build configs now so the live preview has data on first arrival,
 	// not only after the user has confirmed a direction once.
 	m.activeConfigs = buildActiveMonitorConfigs(m.monitors, m.activeIndexes, m.selectedModes)
+	// Mirrored layouts have no direction or order — go straight to preview.
+	if m.mirrored {
+		m.configLines = renderMirroredConfigLines(m.monitors, m.activeConfigs, mirrorSourceIndex(m.monitors, m.activeIndexes))
+		m.state = tuiPreview
+		m.viewport.SetContent(strings.Join(m.configLines, "\n"))
+		return m, nil
+	}
 	m.state = tuiDirectionSelect
 	m.list = m.makeDirectionList()
 	return m, nil
@@ -854,6 +863,9 @@ func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
 		return m, nil
 
 	case tuiPreview:
+		if m.mirrored {
+			return m.rewindToLastModeOrLayout()
+		}
 		m.state = tuiOrderInput
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = orderPlaceholder(m.activeConfigs)

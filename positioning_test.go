@@ -151,6 +151,31 @@ func TestRenderPositionedConfigLinesBottomToTopThreeMonitors(t *testing.T) {
 	}
 }
 
+// ── renderMirroredConfigLines ─────────────────────────────────────────────────
+
+func TestRenderMirroredConfigLines(t *testing.T) {
+	monitors := []monitor{
+		{Name: "eDP-1", Scale: 1.5},
+		{Name: "DP-1", Scale: 1, Focused: true},
+		{Name: "HDMI-A-1", Scale: 1},
+	}
+	activeConfigs := []activeMonitorConfig{
+		{Index: 0, Mode: monitorMode{Width: 2880, Height: 1800, RefreshRate: 120}},
+		{Index: 1, Mode: monitorMode{Width: 2560, Height: 1440, RefreshRate: 165}},
+	}
+
+	got := renderMirroredConfigLines(monitors, activeConfigs, 1)
+	want := []string{
+		"monitor = DP-1, 2560x1440@165, 0x0, 1",
+		"monitor = eDP-1, 2880x1800@120, 0x0, 1.5, mirror, DP-1",
+		"monitor = HDMI-A-1, disable",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mirrored:\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
 // ── reorderActiveConfigs ──────────────────────────────────────────────────────
 
 func TestReorderActiveConfigsValid(t *testing.T) {

@@ -13,6 +13,15 @@ type layoutOption struct {
 	Name string
 }
 
+const (
+	layoutLaptopOnly       = 1
+	layoutExternalOnly     = 2
+	layoutDualHorizontal   = 3
+	layoutTripleHorizontal = 4
+	layoutMirror           = 5
+	layoutQuit             = 6
+)
+
 func promptLayoutSelection(r io.Reader, w io.Writer) (layoutOption, error) {
 	options := layoutOptions()
 	reader := bufio.NewReader(r)
@@ -44,11 +53,12 @@ func promptLayoutSelection(r io.Reader, w io.Writer) (layoutOption, error) {
 
 func layoutOptions() []layoutOption {
 	return []layoutOption{
-		{ID: 1, Name: "Laptop only"},
-		{ID: 2, Name: "External only"},
-		{ID: 3, Name: "Dual horizontal"},
-		{ID: 4, Name: "Triple horizontal"},
-		{ID: 5, Name: "Quit"},
+		{ID: layoutLaptopOnly, Name: "Laptop only"},
+		{ID: layoutExternalOnly, Name: "External only"},
+		{ID: layoutDualHorizontal, Name: "Dual horizontal"},
+		{ID: layoutTripleHorizontal, Name: "Triple horizontal"},
+		{ID: layoutMirror, Name: "Mirror all displays"},
+		{ID: layoutQuit, Name: "Quit"},
 	}
 }
 
@@ -74,17 +84,46 @@ func parseLayoutSelection(input string, options []layoutOption) (layoutOption, e
 
 func activeIndexesForLayout(monitors []monitor, layoutID int) ([]int, error) {
 	switch layoutID {
-	case 1:
+	case layoutLaptopOnly:
 		return buildLaptopOnly(monitors)
-	case 2:
+	case layoutExternalOnly:
 		return buildExternalOnly(monitors)
-	case 3:
+	case layoutDualHorizontal:
 		return buildHorizontalLayout(monitors, 2)
-	case 4:
+	case layoutTripleHorizontal:
 		return buildHorizontalLayout(monitors, 3)
+	case layoutMirror:
+		return buildMirrorLayout(monitors)
 	default:
 		return nil, fmt.Errorf("unknown layout: %d", layoutID)
 	}
+}
+
+// buildMirrorLayout activates every connected monitor; one acts as the mirror
+// source and the rest mirror it.
+func buildMirrorLayout(monitors []monitor) ([]int, error) {
+	if len(monitors) < 2 {
+		return nil, fmt.Errorf("need at least 2 monitors to mirror")
+	}
+
+	indexes := make([]int, len(monitors))
+	for idx := range monitors {
+		indexes[idx] = idx
+	}
+
+	return indexes, nil
+}
+
+// mirrorSourceIndex picks the monitor the others mirror: the focused monitor
+// when it is active, otherwise the first active monitor.
+func mirrorSourceIndex(monitors []monitor, activeIndexes []int) int {
+	for _, idx := range activeIndexes {
+		if monitors[idx].Focused {
+			return idx
+		}
+	}
+
+	return activeIndexes[0]
 }
 
 func buildLaptopOnly(monitors []monitor) ([]int, error) {

@@ -212,3 +212,51 @@ func renderPositionedConfigLines(monitors []monitor, activeConfigs []activeMonit
 
 	return lines
 }
+
+// renderMirroredConfigLines generates config lines where every active monitor
+// mirrors the source monitor. The source is emitted first at 0x0; mirrors use
+// Hyprland's `mirror, <source>` keyword. Position is irrelevant for mirrors,
+// so 0x0 is used throughout. Inactive monitors are disabled as usual.
+func renderMirroredConfigLines(monitors []monitor, activeConfigs []activeMonitorConfig, sourceIdx int) []string {
+	lines := make([]string, 0, len(monitors))
+	activeSet := make(map[int]struct{}, len(activeConfigs))
+	sourceName := monitors[sourceIdx].Name
+
+	for _, config := range activeConfigs {
+		activeSet[config.Index] = struct{}{}
+		if config.Index != sourceIdx {
+			continue
+		}
+
+		lines = append(lines, fmt.Sprintf(
+			"monitor = %s, %s, 0x0, %s",
+			sourceName,
+			formatMonitorMode(config.Mode),
+			formatFloat(monitors[config.Index].Scale),
+		))
+	}
+
+	for _, config := range activeConfigs {
+		if config.Index == sourceIdx {
+			continue
+		}
+
+		lines = append(lines, fmt.Sprintf(
+			"monitor = %s, %s, 0x0, %s, mirror, %s",
+			monitors[config.Index].Name,
+			formatMonitorMode(config.Mode),
+			formatFloat(monitors[config.Index].Scale),
+			sourceName,
+		))
+	}
+
+	for idx, mon := range monitors {
+		if _, ok := activeSet[idx]; ok {
+			continue
+		}
+
+		lines = append(lines, fmt.Sprintf("monitor = %s, disable", mon.Name))
+	}
+
+	return lines
+}
