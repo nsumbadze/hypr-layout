@@ -339,6 +339,46 @@ func renderVertPreview(entries []layoutPreviewEntry, availWidth, availHeight int
 	return strings.Join(boxes, "\n")
 }
 
+// renderMirrorPreview draws the mirror source monitor as a single box with a
+// caption listing the monitors that mirror it. Returns "" when there is not
+// enough vertical room.
+func renderMirrorPreview(monitors []monitor, configs []activeMonitorConfig, sourceIdx int, availWidth, availHeight int) string {
+	if availHeight < minPreviewBoxH+1 {
+		return ""
+	}
+
+	var source *activeMonitorConfig
+	mirrors := make([]string, 0, len(configs))
+	for i := range configs {
+		if configs[i].Index == sourceIdx {
+			source = &configs[i]
+			continue
+		}
+		mirrors = append(mirrors, monitors[configs[i].Index].Name)
+	}
+	if source == nil {
+		return ""
+	}
+
+	boxH := 5
+	if boxH > availHeight-1 {
+		boxH = availHeight - 1
+	}
+	innerW := availWidth - boxOverhead
+	if innerW > 40 {
+		innerW = 40
+	}
+	if innerW < 12 {
+		innerW = 12
+	}
+
+	box := previewBox(monitors[sourceIdx].Name, source.Mode, innerW, boxH, 0)
+	if len(mirrors) == 0 {
+		return box
+	}
+	return box + "\n" + styleDimmed.Render("mirrored by "+strings.Join(mirrors, ", "))
+}
+
 // previewBox renders a single labelled monitor box for the direction preview.
 // innerW is the content width (excluding border/padding), totalH is the full
 // rendered height (including border lines), marginRight adds right margin.

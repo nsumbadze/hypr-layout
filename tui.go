@@ -378,6 +378,7 @@ func (m tuiModel) finishSettings() (tuiModel, tea.Cmd) {
 	if m.mirrored {
 		m.configLines = renderMirroredConfigLines(m.monitors, m.activeConfigs, mirrorSourceIndex(m.monitors, m.activeIndexes))
 		m.state = tuiPreview
+		m = m.resizeComponents()
 		m.viewport.SetContent(strings.Join(m.configLines, "\n"))
 		return m, nil
 	}
@@ -477,6 +478,7 @@ func (m tuiModel) updateOrderInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.configLines = renderPositionedConfigLines(m.monitors, m.activeConfigs, m.direction)
 		m.state = tuiPreview
 		m.inputErr = ""
+		m = m.resizeComponents()
 		m.viewport.SetContent(strings.Join(m.configLines, "\n"))
 		return m, nil
 	}
@@ -616,9 +618,13 @@ func (m tuiModel) View() string {
 	if m.width < 40 || m.height < 10 {
 		return "  Terminal too small — resize to continue.\n"
 	}
+	// MaxHeight clips any component quirk (e.g. the list paginator drawing one
+	// line beyond its set height) so the footer is never pushed off-screen.
+	contentH := m.height - 2
+	body := lipgloss.NewStyle().Height(contentH).MaxHeight(contentH).Render(m.bodyView())
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.headerView(),
-		m.bodyView(),
+		body,
 		m.footerView(),
 	)
 }
@@ -627,20 +633,21 @@ func (m tuiModel) headerView() string {
 	appName := styleAccent.Copy().Bold(true).Render("hypr-layout")
 	step := styleMuted.Render(m.stepLabel())
 	inner := "  " + appName + "  " + styleDimmed.Render("·") + "  " + step
-	pad := m.width - lipgloss.Width(inner)
-	if pad > 0 {
-		inner += strings.Repeat(" ", pad)
-	}
-	return styleBarBg.Copy().Width(m.width).Render(inner)
+	return m.barLine(inner)
 }
 
 func (m tuiModel) footerView() string {
-	inner := "  " + m.footerHints()
+	return m.barLine("  " + m.footerHints())
+}
+
+// barLine pads a header/footer line to the full width and truncates it to a
+// single line so narrow terminals never wrap it onto a second row.
+func (m tuiModel) barLine(inner string) string {
 	pad := m.width - lipgloss.Width(inner)
 	if pad > 0 {
 		inner += strings.Repeat(" ", pad)
 	}
-	return styleBarBg.Copy().Width(m.width).Render(inner)
+	return styleBarBg.Copy().MaxWidth(m.width).MaxHeight(1).Render(inner)
 }
 
 func (m tuiModel) stepLabel() string {
@@ -735,13 +742,13 @@ func (m tuiModel) bodyView() string {
 				title += fmt.Sprintf("  %s", styleDimmed.Render(fmt.Sprintf("(%d of %d)", m.currentModeIdx+1, len(m.activeIndexes))))
 			}
 		}
-		return m.listView(contentH, title)
+		return m.modeSelectView(contentH, title)
 	case tuiSettingsConfirm:
 		return m.yesNoView(contentH, "Adjust display settings (rotation, VRR)?")
 	case tuiTransformSelect:
-		return m.listView(contentH, m.settingsScreenTitle("Select rotation"))
+		return m.transformSelectView(contentH)
 	case tuiVRRSelect:
-		return m.listView(contentH, m.settingsScreenTitle("Select VRR"))
+		return m.vrrSelectView(contentH)
 	case tuiDirectionSelect:
 		return m.directionSelectView(contentH)
 	case tuiOrderInput:
@@ -823,30 +830,56 @@ func (m tuiModel) spinnerView(h int, label string) string {
 	return lipgloss.NewStyle().Height(h).Render(b.String())
 }
 
+// appendPreviewSection appends a live arrangement preview beneath body when
+// enough vertical room remains for it; otherwise body is returned unchanged.
+// The remaining room is measured from the rendered body so every screen fits
+// the terminal without per-screen line accounting. Mirror layouts render a
+// source box with a caption instead of positioned boxes.
+func (m tuiModel) appendPreviewSection(body string, configs []activeMonitorConfig, direction layoutDirection, mirrored bool, sourceIdx int) string {
+	body = strings.TrimRight(body, "\n")
+	if len(configs) == 0 {
+		return body
+	}
+	contentH := m.height - 2
+	// 3 lines of chrome around the diagram: blank, "Preview" title, blank.
+	availH := contentH - lipgloss.Height(body) - 3
+	previewW := m.width - 6
+	if previewW < 24 {
+		previewW = 24
+	}
+	var preview string
+	if mirrored {
+		preview = renderMirrorPreview(m.monitors, configs, sourceIdx, previewW, availH)
+	} else {
+		preview = renderDirectionPreview(m.monitors, configs, direction, previewW, availH)
+	}
+	if preview == "" {
+		return body
+	}
+	return body + "\n\n  " + styleTitle.Render("Preview") + "\n\n" + indentBlock(preview, 2)
+}
+
+// mirrorSource returns the source monitor index for the given active indexes
+// when the mirror layout is in play.
+func (m tuiModel) mirrorSource(activeIndexes []int) int {
+	if len(activeIndexes) == 0 {
+		return 0
+	}
+	return mirrorSourceIndex(m.monitors, activeIndexes)
+}
+
 func (m tuiModel) directionSelectView(h int) string {
 	var b strings.Builder
 	b.WriteString("\n  " + styleTitle.Render("Select layout direction") + "\n\n")
 	b.WriteString(m.list.View())
 
+	body := b.String()
 	// Live preview: recalculate and redraw for whichever item is highlighted.
-	if item, ok := m.list.SelectedItem().(dirListItem); ok && len(m.activeConfigs) > 0 {
-		previewW := m.width - 6
-		if previewW < 24 {
-			previewW = 24
-		}
-		// The body must fit in h lines or the terminal clips it: 6 lines of
-		// title/spacing/"Preview" chrome plus the list leaves this much room
-		// for the diagram itself.
-		previewH := h - 6 - directionListHeight
-		preview := renderDirectionPreview(m.monitors, m.activeConfigs, item.dir, previewW, previewH)
-		if preview != "" {
-			b.WriteString("\n\n  " + styleTitle.Render("Preview") + "\n\n")
-			b.WriteString(indentBlock(preview, 2))
-			b.WriteByte('\n')
-		}
+	if item, ok := m.list.SelectedItem().(dirListItem); ok {
+		body = m.appendPreviewSection(body, m.activeConfigs, item.dir, false, 0)
 	}
 
-	return lipgloss.NewStyle().Height(h).Render(b.String())
+	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
 func (m tuiModel) layoutSelectView(h int) string {
@@ -865,7 +898,21 @@ func (m tuiModel) layoutSelectView(h int) string {
 	}
 	b.WriteString("\n  " + styleTitle.Render("Select a layout") + "\n\n")
 	b.WriteString(m.list.View())
-	return lipgloss.NewStyle().Height(h).Render(b.String())
+
+	body := b.String()
+	// Live preview of which monitors the highlighted layout would activate.
+	if item, ok := m.list.SelectedItem().(layoutListItem); ok && item.opt.ID != layoutQuit {
+		indexes, err := activeIndexesForLayout(m.monitors, item.opt.ID)
+		if err != nil {
+			body = strings.TrimRight(body, "\n") + "\n\n  " + styleDimmed.Render("Not available: "+err.Error())
+		} else {
+			configs := buildActiveMonitorConfigs(m.monitors, indexes, nil)
+			mirrored := item.opt.ID == layoutMirror
+			body = m.appendPreviewSection(body, configs, leftToRight, mirrored, m.mirrorSource(indexes))
+		}
+	}
+
+	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
 func (m tuiModel) listView(h int, title string) string {
@@ -873,6 +920,56 @@ func (m tuiModel) listView(h int, title string) string {
 	b.WriteString("\n  " + styleTitle.Render(title) + "\n\n")
 	b.WriteString(m.list.View())
 	return lipgloss.NewStyle().Height(h).Render(b.String())
+}
+
+// modeSelectView shows the mode list with a live preview of the arrangement
+// using the highlighted mode for the monitor being configured.
+func (m tuiModel) modeSelectView(h int, title string) string {
+	var b strings.Builder
+	b.WriteString("\n  " + styleTitle.Render(title) + "\n\n")
+	b.WriteString(m.list.View())
+
+	body := b.String()
+	if item, ok := m.list.SelectedItem().(modeListItem); ok && m.currentModeIdx < len(m.activeIndexes) {
+		hovered := make(map[int]monitorMode, len(m.selectedModes)+1)
+		for idx, mode := range m.selectedModes {
+			hovered[idx] = mode
+		}
+		hovered[m.activeIndexes[m.currentModeIdx]] = item.mode
+		configs := buildActiveMonitorConfigs(m.monitors, m.activeIndexes, hovered)
+		body = m.appendPreviewSection(body, configs, leftToRight, m.mirrored, m.mirrorSource(m.activeIndexes))
+	}
+
+	return lipgloss.NewStyle().Height(h).Render(body)
+}
+
+// transformSelectView shows the rotation list with a live preview: hovering a
+// 90°/270° transform visibly swaps the monitor's box proportions.
+func (m tuiModel) transformSelectView(h int) string {
+	var b strings.Builder
+	b.WriteString("\n  " + styleTitle.Render(m.settingsScreenTitle("Select rotation")) + "\n\n")
+	b.WriteString(m.list.View())
+
+	body := b.String()
+	if item, ok := m.list.SelectedItem().(settingListItem); ok && m.currentSettingsIdx < len(m.activeConfigs) {
+		configs := make([]activeMonitorConfig, len(m.activeConfigs))
+		copy(configs, m.activeConfigs)
+		configs[m.currentSettingsIdx].Transform = item.value
+		body = m.appendPreviewSection(body, configs, leftToRight, m.mirrored, m.mirrorSource(m.activeIndexes))
+	}
+
+	return lipgloss.NewStyle().Height(h).Render(body)
+}
+
+// vrrSelectView shows the VRR list; VRR has no spatial effect, so the preview
+// simply keeps the current arrangement visible for context.
+func (m tuiModel) vrrSelectView(h int) string {
+	var b strings.Builder
+	b.WriteString("\n  " + styleTitle.Render(m.settingsScreenTitle("Select VRR")) + "\n\n")
+	b.WriteString(m.list.View())
+
+	body := m.appendPreviewSection(b.String(), m.activeConfigs, leftToRight, m.mirrored, m.mirrorSource(m.activeIndexes))
+	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
 func (m tuiModel) orderInputView(h int) string {
@@ -891,7 +988,16 @@ func (m tuiModel) orderInputView(h int) string {
 	if m.inputErr != "" {
 		b.WriteString("\n  " + styleErr.Render(m.inputErr) + "\n")
 	}
-	return lipgloss.NewStyle().Height(h).Render(b.String())
+
+	// Live preview: when the typed order parses, show that arrangement;
+	// otherwise keep showing the current one.
+	ordered := m.activeConfigs
+	if parsed, err := reorderActiveConfigs(strings.TrimSpace(m.textInput.Value()), m.activeConfigs); err == nil {
+		ordered = parsed
+	}
+	body := m.appendPreviewSection(b.String(), ordered, m.direction, false, 0)
+
+	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
 func (m tuiModel) previewView(h int) string {
@@ -908,7 +1014,9 @@ func (m tuiModel) previewView(h int) string {
 	b.WriteString("\n  " + styleMuted.Render("Save as profile?  ") +
 		styleAccent.Render("y") + styleDimmed.Render(" yes  ") +
 		styleAccent.Render("n") + styleDimmed.Render(" skip") + "\n")
-	return lipgloss.NewStyle().Height(h).Render(b.String())
+
+	body := m.appendPreviewSection(b.String(), m.activeConfigs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))
+	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
 func (m tuiModel) yesNoView(h int, question string) string {
@@ -1115,23 +1223,29 @@ func (m tuiModel) resizeComponents() tuiModel {
 		return m
 	}
 	contentH := m.height - 2
-	listH := contentH - 4
-	if listH < 2 {
-		listH = 2
-	}
 	// Only resize the list when it has been initialised; calling SetSize on a
 	// zero-value list.Model panics because its internal paginator is nil.
+	// Lists are kept compact so the live preview has room below them.
 	switch m.state {
-	case tuiLayoutSelect, tuiModeSelect, tuiTransformSelect, tuiVRRSelect:
-		m.list.SetSize(m.width-4, listH)
+	case tuiLayoutSelect:
+		m.list.SetSize(m.width-4, m.clampListHeight(layoutListHeight, len(m.monitors)+3))
+	case tuiModeSelect:
+		m.list.SetSize(m.width-4, m.modeListHeight(len(m.list.Items())))
+	case tuiTransformSelect:
+		m.list.SetSize(m.width-4, m.clampListHeight(transformListHeight, 0))
+	case tuiVRRSelect:
+		m.list.SetSize(m.width-4, m.clampListHeight(vrrListHeight, 0))
 	case tuiDirectionSelect:
-		// Direction list has exactly 4 fixed items. Keep it compact so the
-		// live preview has room below it on the same screen.
-		m.list.SetSize(m.width-4, directionListHeight)
+		m.list.SetSize(m.width-4, m.clampListHeight(directionListHeight, 0))
 	}
 
 	vpW := m.width - 10
 	vpH := contentH - 8
+	// The config lines are short; capping the viewport to its content leaves
+	// room for the arrangement preview below the config box.
+	if n := len(m.configLines); n > 0 && vpH > n {
+		vpH = n
+	}
 	if vpW < 4 {
 		vpW = 4
 	}
@@ -1149,12 +1263,58 @@ func (m tuiModel) makeLayoutList() list.Model {
 	for _, opt := range opts {
 		items = append(items, layoutListItem{opt: opt})
 	}
-	return m.newStyledList(items)
+	l := m.newStyledList(items)
+	l.SetSize(m.width-4, m.clampListHeight(layoutListHeight, len(m.monitors)+3))
+	return l
 }
 
 // modeShortcutCount is the number of strategy shortcut entries prepended to
 // every TUI mode list; modeListIdx offsets restored cursors by this amount.
 const modeShortcutCount = 3
+
+// Fixed list heights: item count + 1 spare row, which keeps the bubbles
+// paginator hidden so every option is visible at once. Compact lists leave
+// room for the live preview below them.
+const (
+	layoutListHeight    = 7 // 6 layout options
+	transformListHeight = 9 // 8 transforms
+	vrrListHeight       = 4 // 3 VRR modes
+)
+
+// previewReserve is the vertical room kept free below variable-height lists
+// (the mode list) so the live preview fits: 3 lines of chrome plus a 5-line
+// row of boxes.
+const previewReserve = 8
+
+// modeListHeight caps the mode list so it never swallows the space reserved
+// for the preview, while long mode lists still paginate.
+func (m tuiModel) modeListHeight(itemCount int) int {
+	maxH := m.height - 2 - 4 - previewReserve
+	if maxH > itemCount+1 {
+		maxH = itemCount + 1
+	}
+	if maxH < 4 {
+		maxH = 4
+	}
+	return maxH
+}
+
+// clampListHeight bounds a fixed list height so the list plus its title
+// chrome always fits the terminal (lists paginate when shrunk). extraLines
+// accounts for content rendered above the list beyond the standard 3 title
+// lines, e.g. the detected-monitors block on the layout screen.
+func (m tuiModel) clampListHeight(desired, extraLines int) int {
+	maxH := m.height - 2 - 3 - extraLines
+	if desired > maxH {
+		// A clamped list paginates, and the bubbles paginator renders one
+		// line beyond the set height — shrink once more to absorb it.
+		desired = maxH - 1
+	}
+	if desired < 2 {
+		desired = 2
+	}
+	return desired
+}
 
 func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 	curr := currentMonitorMode(mon)
@@ -1168,7 +1328,9 @@ func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 		isCurr := mode.Width == curr.Width && mode.Height == curr.Height && mode.RefreshRate == curr.RefreshRate
 		items = append(items, modeListItem{mode: mode, current: isCurr})
 	}
-	return m.newStyledList(items)
+	l := m.newStyledList(items)
+	l.SetSize(m.width-4, m.modeListHeight(len(items)))
+	return l
 }
 
 // hyprland transform values: 0-3 rotate counter-clockwise in 90° steps,
@@ -1189,6 +1351,7 @@ func (m tuiModel) makeTransformList(current int) list.Model {
 		items = append(items, settingListItem{label: label, value: value, current: value == current})
 	}
 	l := m.newStyledList(items)
+	l.SetSize(m.width-4, m.clampListHeight(transformListHeight, 0))
 	l.Select(current)
 	return l
 }
@@ -1200,6 +1363,7 @@ func (m tuiModel) makeVRRList(current int) list.Model {
 		settingListItem{label: "Fullscreen only", value: 2, current: current == 2},
 	}
 	l := m.newStyledList(items)
+	l.SetSize(m.width-4, m.clampListHeight(vrrListHeight, 0))
 	l.Select(current)
 	return l
 }
@@ -1218,7 +1382,7 @@ func (m tuiModel) makeDirectionList() list.Model {
 		dirListItem{name: "Bottom → top", dir: bottomToTop},
 	}
 	l := m.newStyledList(items)
-	l.SetSize(m.width-4, directionListHeight)
+	l.SetSize(m.width-4, m.clampListHeight(directionListHeight, 0))
 	return l
 }
 
