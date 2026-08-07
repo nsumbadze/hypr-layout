@@ -27,6 +27,8 @@ func (m tuiModel) resizeComponents() tuiModel {
 		m.list.SetSize(m.width-4, m.modeListHeight(len(m.list.Items())))
 	case tuiTransformSelect:
 		m.list.SetSize(m.width-4, m.clampListHeight(transformListHeight, 0))
+	case tuiVRRSelect:
+		m.list.SetSize(m.width-4, m.clampListHeight(vrrListHeight, 0))
 	case tuiDirectionSelect:
 		m.list.SetSize(m.width-4, m.clampListHeight(directionListHeight, 0))
 	}
@@ -70,6 +72,7 @@ const modeShortcutCount = 3
 const (
 	layoutListHeight    = 7 // 6 layout options
 	transformListHeight = 9 // 8 transforms
+	vrrListHeight       = 4 // 3 VRR modes
 )
 
 // previewReserve is the vertical room kept free below variable-height lists
@@ -133,6 +136,18 @@ func (m tuiModel) makeTransformList(current int) list.Model {
 	}
 	l := m.newStyledList(items)
 	l.SetSize(m.width-4, m.clampListHeight(transformListHeight, 0))
+	l.Select(current)
+	return l
+}
+
+func (m tuiModel) makeVRRList(current int) list.Model {
+	items := []list.Item{
+		settingListItem{label: "Off", value: 0, current: current == 0},
+		settingListItem{label: "On", value: 1, current: current == 1},
+		settingListItem{label: "Fullscreen only", value: 2, current: current == 2},
+	}
+	l := m.newStyledList(items)
+	l.SetSize(m.width-4, m.clampListHeight(vrrListHeight, 0))
 	l.Select(current)
 	return l
 }

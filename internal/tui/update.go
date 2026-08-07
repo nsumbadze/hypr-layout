@@ -71,13 +71,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ui.Dimmed.Render("  Backup: "+msg.result.BackupPath),
 			)
 		}
-		if !m.reloadAfterWrite {
-			m.statusLines = append(m.statusLines,
-				ui.Dimmed.Render("  Run ")+ui.Accent.Render("hyprctl reload")+ui.Dimmed.Render(" to apply."),
-			)
-			m.state = tuiDone
-			return m, nil
-		}
 		return m.startReload()
 
 	case reloadDoneMsg:
@@ -116,6 +109,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateModeSelect(msg)
 	case tuiTransformSelect:
 		return m.updateTransformSelect(msg)
+	case tuiVRRSelect:
+		return m.updateVRRSelect(msg)
 	case tuiDirectionSelect:
 		return m.updateDirectionSelect(msg)
 	case tuiOrderEdit:
@@ -157,7 +152,7 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// now, so the hub opens showing the current setup rather than a
 		// proposed new one.
 		m.activeConfigs = layout.BuildConfigs(m.monitors, indexes, nil)
-		m.reviewCursor = 0
+		m.reviewCursor = firstSelectableRow(m.reviewRows())
 		m.state = tuiReview
 		m = m.resizeComponents()
 		return m, nil
@@ -169,11 +164,10 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ── apply ─────────────────────────────────────────────────────────────────────
 
-// startApply writes the config, then reloads Hyprland unless the user chose to
-// write only. There is no confirmation step: the previous file is backed up
-// first and a failed reload rolls back automatically.
-func (m tuiModel) startApply(reload bool) (tea.Model, tea.Cmd) {
-	m.reloadAfterWrite = reload
+// startApply writes the config and reloads Hyprland. There is no confirmation
+// step: the previous file is backed up first and a failed reload rolls back
+// automatically.
+func (m tuiModel) startApply() (tea.Model, tea.Cmd) {
 	m.configLines = m.buildConfigLines()
 	m.state = tuiApplying
 	lines := m.configLines

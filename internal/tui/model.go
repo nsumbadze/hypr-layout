@@ -31,6 +31,7 @@ const (
 	tuiReview
 	tuiModeSelect
 	tuiTransformSelect
+	tuiVRRSelect
 	tuiDirectionSelect
 	tuiOrderEdit
 	tuiConfigView
@@ -44,7 +45,7 @@ const (
 // editorStates are the states opened from the review hub; escape returns to it.
 func isEditorState(s tuiState) bool {
 	switch s {
-	case tuiModeSelect, tuiTransformSelect, tuiDirectionSelect,
+	case tuiModeSelect, tuiTransformSelect, tuiVRRSelect, tuiDirectionSelect,
 		tuiOrderEdit, tuiConfigView, tuiProfileName:
 		return true
 	}
@@ -130,12 +131,7 @@ type tuiKeyMap struct {
 	Enter    key.Binding
 	MoveUp   key.Binding
 	MoveDown key.Binding
-	Rotate   key.Binding
-	VRR      key.Binding
 	Apply    key.Binding
-	Write    key.Binding
-	Save     key.Binding
-	Config   key.Binding
 	Back     key.Binding
 	Quit     key.Binding
 }
@@ -146,12 +142,7 @@ var tuiKeys = tuiKeyMap{
 	Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 	MoveUp:   key.NewBinding(key.WithKeys("shift+up", "K"), key.WithHelp("shift+↑", "move up")),
 	MoveDown: key.NewBinding(key.WithKeys("shift+down", "J"), key.WithHelp("shift+↓", "move down")),
-	Rotate:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rotate")),
-	VRR:      key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "vrr")),
 	Apply:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply")),
-	Write:    key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "write only")),
-	Save:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save profile")),
-	Config:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "view config")),
 	Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
@@ -180,8 +171,6 @@ type tuiModel struct {
 	editIdx int
 	// orderBackup restores the pre-edit order when reordering is cancelled.
 	orderBackup []layout.MonitorConfig
-	// reloadAfterWrite distinguishes "apply" from "write only".
-	reloadAfterWrite bool
 
 	// components
 	spinner   spinner.Model

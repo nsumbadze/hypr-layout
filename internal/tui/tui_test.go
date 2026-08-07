@@ -9,7 +9,6 @@ import (
 
 	"github.com/nsumbadze/hypr-layout/internal/hypr"
 	"github.com/nsumbadze/hypr-layout/internal/layout"
-	"github.com/nsumbadze/hypr-layout/internal/ui"
 )
 
 func wizardTestModel(w, h int) tuiModel {
@@ -58,6 +57,11 @@ func wizardScreens(w, h int) map[string]tuiModel {
 	transform.state = tuiTransformSelect
 	transform.list = transform.makeTransformList(0)
 	screens["transform"] = transform
+
+	vrr := wizardTestModel(w, h)
+	vrr.state = tuiVRRSelect
+	vrr.list = vrr.makeVRRList(0)
+	screens["vrr"] = vrr
 
 	direction := wizardTestModel(w, h)
 	direction.state = tuiDirectionSelect
@@ -211,90 +215,138 @@ func TestPendingValuePadsToAStableWidth(t *testing.T) {
 	}
 }
 
-func TestReviewRowsCoverMonitorsAndLayout(t *testing.T) {
+func TestReviewRowsAreOneSettingEach(t *testing.T) {
 	rows := reviewTestModel(100, 40).reviewRows()
-	if len(rows) != 4 {
-		t.Fatalf("expected 2 monitor rows + direction + order, got %d", len(rows))
-	}
-	if rows[2].kind != reviewRowDirection || rows[3].kind != reviewRowOrder {
-		t.Fatalf("expected direction and order rows last, got %+v", rows)
-	}
-}
 
-// Mirrored layouts have no direction or order, so those rows must not appear.
-func TestReviewRowsOmitLayoutRowsWhenMirrored(t *testing.T) {
-	m := reviewTestModel(100, 40)
-	m.mirrored = true
-
-	for _, row := range m.reviewRows() {
-		if row.kind != reviewRowMonitor {
-			t.Fatalf("mirrored layout should only have monitor rows, got kind %v", row.kind)
+	var got []reviewRowKind
+	for _, row := range rows {
+		if row.kind.selectable() {
+			got = append(got, row.kind)
+		}
+	}
+	want := []reviewRowKind{
+		reviewRowMode, reviewRowRotation, reviewRowVRR,
+		reviewRowMode, reviewRowRotation, reviewRowVRR,
+		reviewRowDirection, reviewRowOrder,
+		reviewRowSaveProfile, reviewRowShowConfig,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d selectable rows, got %d", len(want), len(got))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("row %d: expected kind %v, got %v", i, want[i], got[i])
 		}
 	}
 }
 
-func TestReviewShowsEveryMonitorWithItsSettings(t *testing.T) {
+// Every monitor's settings must sit under a header naming that monitor.
+func TestReviewGroupsSettingsUnderMonitorHeaders(t *testing.T) {
+	rows := reviewTestModel(100, 40).reviewRows()
+
+	var headers []string
+	for _, row := range rows {
+		if row.kind == reviewRowHeader {
+			headers = append(headers, row.label)
+		}
+	}
+	want := []string{"DP-1", "HDMI-A-2", "Layout", "Actions"}
+	if len(headers) != len(want) {
+		t.Fatalf("expected headers %v, got %v", want, headers)
+	}
+	for i := range want {
+		if headers[i] != want[i] {
+			t.Fatalf("expected header %q, got %q", want[i], headers[i])
+		}
+	}
+}
+
+// Mirrored layouts have no direction or order, so that group must not appear.
+func TestReviewRowsOmitLayoutGroupWhenMirrored(t *testing.T) {
+	m := reviewTestModel(100, 40)
+	m.mirrored = true
+
+	for _, row := range m.reviewRows() {
+		if row.kind == reviewRowDirection || row.kind == reviewRowOrder {
+			t.Fatalf("mirrored layout should have no layout rows, got kind %v", row.kind)
+		}
+		if row.kind == reviewRowHeader && row.label == "Layout" {
+			t.Fatal("mirrored layout should have no Layout header")
+		}
+	}
+}
+
+// The cursor must never come to rest on a header or a blank line.
+func TestReviewCursorSkipsUnselectableRows(t *testing.T) {
+	m := reviewTestModel(100, 40)
+	rows := m.reviewRows()
+	m.reviewCursor = firstSelectableRow(rows)
+
+	for step := 0; step < len(rows); step++ {
+		next, _ := m.updateReview(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(tuiModel)
+		if !rows[m.reviewCursor].kind.selectable() {
+			t.Fatalf("cursor landed on unselectable row %d (kind %v)", m.reviewCursor, rows[m.reviewCursor].kind)
+		}
+	}
+	for step := 0; step < len(rows); step++ {
+		next, _ := m.updateReview(tea.KeyMsg{Type: tea.KeyUp})
+		m = next.(tuiModel)
+		if !rows[m.reviewCursor].kind.selectable() {
+			t.Fatalf("cursor landed on unselectable row %d (kind %v)", m.reviewCursor, rows[m.reviewCursor].kind)
+		}
+	}
+}
+
+func TestReviewLabelsEverySetting(t *testing.T) {
 	view := reviewTestModel(100, 40).View()
-	for _, want := range []string{"DP-1", "HDMI-A-2", "2560x1440@165", "Normal", "vrr off", "Direction", "Order"} {
+	for _, want := range []string{
+		"DP-1", "HDMI-A-2", "Mode", "Rotation", "VRR",
+		"Layout", "Direction", "Order", "Actions", "Save as profile", "Show config",
+		"2560x1440@165", "Normal", "Off",
+	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("review view missing %q:\n%s", want, view)
 		}
 	}
 }
 
-// VRR cycles in place on the hub rather than costing a screen of its own.
-func TestReviewCyclesVRRInPlace(t *testing.T) {
-	m := reviewTestModel(100, 40)
-	m.reviewCursor = 1
-
-	for _, want := range []int{1, 2, 0} {
-		next, _ := m.updateReview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
-		m = next.(tuiModel)
-		if got := m.activeConfigs[1].VRR; got != want {
-			t.Fatalf("expected VRR %d after cycling, got %d", want, got)
-		}
-		if m.state != tuiReview {
-			t.Fatalf("cycling VRR should stay on the hub, got state %v", m.state)
-		}
-	}
-}
-
-// The rotation and VRR shortcuts only act on monitor rows.
-func TestReviewShortcutsIgnoreLayoutRows(t *testing.T) {
-	m := reviewTestModel(100, 40)
-	m.reviewCursor = 2 // direction row
-
-	next, _ := m.updateReview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	if got := next.(tuiModel).state; got != tuiReview {
-		t.Fatalf("rotate on a layout row should stay on the hub, got state %v", got)
-	}
-}
-
-func TestReviewOpensEditorForHighlightedRow(t *testing.T) {
+func TestEnterOpensTheEditorForEachRow(t *testing.T) {
 	tests := []struct {
-		name   string
-		cursor int
-		key    tea.KeyMsg
-		want   tuiState
+		name string
+		kind reviewRowKind
+		want tuiState
 	}{
-		{"mode", 0, tea.KeyMsg{Type: tea.KeyEnter}, tuiModeSelect},
-		{"rotation", 0, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}, tuiTransformSelect},
-		{"direction", 2, tea.KeyMsg{Type: tea.KeyEnter}, tuiDirectionSelect},
-		{"order", 3, tea.KeyMsg{Type: tea.KeyEnter}, tuiOrderEdit},
-		{"config", 0, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}, tuiConfigView},
-		{"profile", 0, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}, tuiProfileName},
+		{"mode", reviewRowMode, tuiModeSelect},
+		{"rotation", reviewRowRotation, tuiTransformSelect},
+		{"vrr", reviewRowVRR, tuiVRRSelect},
+		{"direction", reviewRowDirection, tuiDirectionSelect},
+		{"order", reviewRowOrder, tuiOrderEdit},
+		{"save profile", reviewRowSaveProfile, tuiProfileName},
+		{"show config", reviewRowShowConfig, tuiConfigView},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := reviewTestModel(100, 40)
-			m.reviewCursor = tc.cursor
+			m.reviewCursor = rowIndexOfKind(t, m, tc.kind)
 
-			next, _ := m.updateReview(tc.key)
+			next, _ := m.updateReview(tea.KeyMsg{Type: tea.KeyEnter})
 			if got := next.(tuiModel).state; got != tc.want {
 				t.Fatalf("expected state %v, got %v", tc.want, got)
 			}
 		})
 	}
+}
+
+func rowIndexOfKind(t *testing.T, m tuiModel, kind reviewRowKind) int {
+	t.Helper()
+	for i, row := range m.reviewRows() {
+		if row.kind == kind {
+			return i
+		}
+	}
+	t.Fatalf("no row of kind %v", kind)
+	return 0
 }
 
 // Every editor returns to the hub rather than to another step.
@@ -391,7 +443,7 @@ func TestOrderEditClampsAtEnds(t *testing.T) {
 // Escaping out of a reorder must restore the order it started with.
 func TestOrderEditCancelRestoresOrder(t *testing.T) {
 	m := reviewTestModel(100, 40)
-	m.reviewCursor = 3 // order row
+	m.reviewCursor = rowIndexOfKind(t, m, reviewRowOrder)
 
 	opened, _ := m.updateReview(tea.KeyMsg{Type: tea.KeyEnter})
 	moved, _ := opened.(tuiModel).updateOrderEdit(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
@@ -435,28 +487,21 @@ func TestBackAllowedOnlyWhereThereIsSomethingToGoBackTo(t *testing.T) {
 
 // ── apply ─────────────────────────────────────────────────────────────────────
 
-// "w" writes without reloading; "a" reloads afterwards. Neither asks first.
-func TestApplyAndWriteSetReloadIntent(t *testing.T) {
-	for _, tc := range []struct {
-		key        rune
-		wantReload bool
-	}{{'a', true}, {'w', false}} {
-		m := reviewTestModel(100, 40)
-		next, cmd := m.updateReview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
-		got := next.(tuiModel)
+// "a" writes and reloads in one step, with no confirmation in between.
+func TestApplyWritesAndReloads(t *testing.T) {
+	m := reviewTestModel(100, 40)
 
-		if got.state != tuiApplying {
-			t.Fatalf("%q: expected applying state, got %v", tc.key, got.state)
-		}
-		if got.reloadAfterWrite != tc.wantReload {
-			t.Fatalf("%q: expected reloadAfterWrite=%v", tc.key, tc.wantReload)
-		}
-		if cmd == nil {
-			t.Fatalf("%q: expected a write command", tc.key)
-		}
-		if len(got.configLines) == 0 {
-			t.Fatalf("%q: expected config lines to be rendered", tc.key)
-		}
+	next, cmd := m.updateReview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	got := next.(tuiModel)
+
+	if got.state != tuiApplying {
+		t.Fatalf("expected applying state, got %v", got.state)
+	}
+	if cmd == nil {
+		t.Fatal("expected a write command")
+	}
+	if len(got.configLines) == 0 {
+		t.Fatal("expected config lines to be rendered")
 	}
 }
 
@@ -473,20 +518,43 @@ func TestBuildConfigLinesFollowsLayoutKind(t *testing.T) {
 	}
 }
 
-// The hub carries more shortcuts than a narrow terminal fits, so the optional
-// ones must drop off rather than be truncated mid-word.
-func TestReviewHintsFitTerminalWidth(t *testing.T) {
-	for _, w := range []int{50, 60, 84, 120} {
+// The hub footer must fit even a narrow terminal without being truncated.
+func TestReviewFooterFitsNarrowTerminals(t *testing.T) {
+	for _, w := range []int{60, 84, 120} {
 		m := reviewTestModel(w, 26)
-		hints := m.reviewHints(ui.Dimmed.Render("  ·  "))
-
-		if got := lipgloss.Width(hints) + 2; got > w {
-			t.Fatalf("at width %d: hints occupy %d columns: %q", w, got, hints)
+		if got := lipgloss.Width(m.footerHints()) + 2; got > w {
+			t.Fatalf("at width %d: footer occupies %d columns", w, got)
 		}
-		for _, essential := range []string{"edit", "apply", "quit"} {
-			if !strings.Contains(hints, essential) {
-				t.Fatalf("at width %d: dropped essential hint %q: %q", w, essential, hints)
-			}
+	}
+}
+
+// A long monitor list must scroll rather than push the preview off screen.
+func TestReviewScrollsInsteadOfHidingPreview(t *testing.T) {
+	m := reviewTestModel(100, 24)
+	rows := m.reviewRows()
+
+	first, last := m.reviewWindow(rows)
+	if last-first >= len(rows) {
+		t.Skip("everything fits at this size; nothing to scroll")
+	}
+	if !strings.Contains(m.View(), "Preview") {
+		t.Fatalf("expected the preview to survive scrolling:\n%s", m.View())
+	}
+}
+
+// Scrolling must always keep the cursor within the drawn window.
+func TestReviewWindowKeepsCursorVisible(t *testing.T) {
+	m := reviewTestModel(100, 20)
+	rows := m.reviewRows()
+
+	for i, row := range rows {
+		if !row.kind.selectable() {
+			continue
+		}
+		m.reviewCursor = i
+		first, last := m.reviewWindow(rows)
+		if i < first || i >= last {
+			t.Fatalf("cursor %d outside drawn window [%d,%d)", i, first, last)
 		}
 	}
 }

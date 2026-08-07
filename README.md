@@ -18,6 +18,7 @@ It reads your monitors from `hyprctl`, drops you on a single review screen with 
 - Layout presets: laptop only, external only, dual, triple, mirror
 - Per-monitor mode selection, with `preferred` / `highres` / `highrr` shortcuts
 - Opens on your current settings, with pending changes highlighted
+- One flat settings list — `enter` changes whatever is highlighted, and that is the only editing key
 - Rotation (transform) and VRR per monitor — 90°/270° rotations are accounted for in positioning
 - Stack monitors in any of the four directions, in any order
 - Live proportional preview on every screen
@@ -49,38 +50,52 @@ source = ~/.config/hypr/monitors.conf
 
 ## Usage
 
-Run `hypr-layout` with no arguments. Pick a layout, and you land on the review screen:
+Run `hypr-layout` with no arguments. Pick a layout, and you land on the review
+screen — one flat list where every row is a single named setting:
 
 ```
-  ▸ DP-1       2560x1440@165     Normal     vrr off
-    HDMI-A-2   1920x1080@60      Normal     vrr off
+  DP-1
+    Mode       2560x1440@165
+  ▸ Rotation   Normal
+    VRR        Off
 
+  HDMI-A-2
+    Mode       2560x1440@144
+    Rotation   Normal
+    VRR        Off
+
+  Layout
     Direction  Left → right
     Order      DP-1 → HDMI-A-2
+
+  Actions
+    Save as profile
+    Show config
 ```
 
-Every row starts at what the monitor is running right now — its current mode,
-rotation and VRR — so the screen reads as your current setup, not a proposed
-new one. Change only what you want; anything that would differ from the current
-setting is highlighted, so the highlights are exactly your pending changes.
+Every row starts at what the monitor is running right now, so the screen reads
+as your current setup rather than a proposed new one. Anything you change is
+highlighted, so the highlights are exactly your pending changes. A live preview
+of the arrangement sits below the list and updates as you go.
+
+There are four keys:
 
 | Key | Action |
 | --- | --- |
-| `↑`/`↓` (or `k`/`j`) | move between rows |
-| `enter` | edit the highlighted row — mode, direction, or reorder |
-| `r` | rotation for the highlighted monitor |
-| `v` | cycle its VRR: off → on → fullscreen |
-| `c` | show the exact config that will be written |
-| `s` | save the layout as a named profile |
+| `↑`/`↓` (or `k`/`j`) | move between settings |
+| `enter` | change the highlighted setting |
 | `a` | apply — write the config and reload Hyprland |
-| `w` | write the config without reloading |
-| `esc` | back |
 | `q` | quit |
+
+`enter` always means the same thing: change this one setting. It opens a list
+for modes, rotation, VRR and direction; the reorder screen for `Order`; and
+runs the two `Actions` rows. `esc` goes back from anywhere.
 
 On the reorder screen, `shift`+`↑`/`↓` moves the highlighted monitor and the
 preview follows along; `enter` keeps the new order and `esc` discards it.
 
-Nothing is written until you press `a` or `w`.
+Nothing is written until you press `a`. The previous `monitors.conf` is backed
+up first, and a failed reload rolls back automatically.
 
 ### Quick presets
 

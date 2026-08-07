@@ -72,6 +72,11 @@ func (m tuiModel) stepLabel() string {
 			return "Rotation for " + mon.Name
 		}
 		return "Rotation"
+	case tuiVRRSelect:
+		if mon, ok := m.editedMonitor(); ok {
+			return "VRR for " + mon.Name
+		}
+		return "VRR"
 	case tuiDirectionSelect:
 		return "Layout direction"
 	case tuiOrderEdit:
@@ -96,20 +101,21 @@ func (m tuiModel) stepLabel() string {
 func (m tuiModel) footerHints() string {
 	dim := func(s string) string { return ui.Dimmed.Render(s) }
 	acc := func(s string) string { return ui.Accent.Render(s) }
-	sep := ui.Dimmed.Render("  ·  ")
+	sep := ui.Dimmed.Render(" · ")
 	back := acc("esc") + " back"
 	switch m.state {
 	case tuiLayoutSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + acc("q") + " quit"
 	case tuiReview:
-		return m.reviewHints(sep)
-	case tuiModeSelect, tuiTransformSelect, tuiDirectionSelect:
+		return dim("↑/↓") + " move" + sep + acc("enter") + " change" + sep +
+			acc("a") + " apply" + sep + back + sep + acc("q") + " quit"
+	case tuiModeSelect, tuiTransformSelect, tuiVRRSelect, tuiDirectionSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + back + sep + acc("q") + " quit"
 	case tuiOrderEdit:
 		return dim("↑/↓") + " select" + sep + acc("shift+↑/↓") + " move" + sep +
 			acc("enter") + " done" + sep + acc("esc") + " cancel"
 	case tuiConfigView:
-		return dim("↑/↓") + " scroll" + sep + back + sep + acc("q") + " quit"
+		return dim("↑/↓") + " scroll" + sep + acc("enter") + " done" + sep + acc("q") + " quit"
 	case tuiProfileName:
 		return acc("enter") + " save" + sep + back + sep + acc("q") + " quit"
 	case tuiDone, tuiErr:
@@ -117,32 +123,6 @@ func (m tuiModel) footerHints() string {
 	default:
 		return ""
 	}
-}
-
-// reviewHints tailors the hub footer to the highlighted row, so the rotation
-// and VRR shortcuts only advertise themselves on the rows they act on. The hub
-// has more shortcuts than a narrow terminal can show, so the less essential
-// ones drop off rather than being truncated mid-word.
-func (m tuiModel) reviewHints(sep string) string {
-	acc := func(s string) string { return ui.Accent.Render(s) }
-
-	always := []string{acc("enter") + " edit", acc("a") + " apply", acc("q") + " quit"}
-	optional := []string{acc("s") + " save", acc("c") + " config", acc("w") + " write"}
-	if row, ok := m.selectedReviewRow(); ok && row.kind == reviewRowMonitor {
-		optional = append([]string{acc("r") + " rotate", acc("v") + " vrr"}, optional...)
-	}
-	optional = append(optional, ui.Dimmed.Render("↑/↓")+" move")
-
-	// Keep "quit" last while dropping optional hints from the least useful end.
-	for n := len(optional); n >= 0; n-- {
-		parts := append(append([]string{}, always[:len(always)-1]...), optional[:n]...)
-		parts = append(parts, always[len(always)-1])
-		hints := strings.Join(parts, sep)
-		if n == 0 || lipgloss.Width(hints)+2 <= m.width {
-			return hints
-		}
-	}
-	return ""
 }
 
 func (m tuiModel) bodyView() string {
@@ -158,6 +138,8 @@ func (m tuiModel) bodyView() string {
 		return m.modeSelectView(contentH)
 	case tuiTransformSelect:
 		return m.transformSelectView(contentH)
+	case tuiVRRSelect:
+		return m.vrrSelectView(contentH)
 	case tuiDirectionSelect:
 		return m.directionSelectView(contentH)
 	case tuiOrderEdit:

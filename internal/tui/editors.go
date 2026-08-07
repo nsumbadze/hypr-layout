@@ -43,6 +43,20 @@ func (m tuiModel) updateTransformSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m tuiModel) updateVRRSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
+		item, ok := m.list.SelectedItem().(settingListItem)
+		if !ok {
+			return m, nil
+		}
+		m.activeConfigs[m.editIdx].VRR = item.value
+		return m.backToReview(), nil
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
 func (m tuiModel) updateDirectionSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
 		item, ok := m.list.SelectedItem().(dirListItem)
@@ -91,8 +105,7 @@ func (m tuiModel) updateOrderEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) updateConfigView(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok &&
-		(key.Matches(km, tuiKeys.Enter) || key.Matches(km, tuiKeys.Config)) {
+	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
 		return m.backToReview(), nil
 	}
 	var cmd tea.Cmd
@@ -182,6 +195,22 @@ func (m tuiModel) transformSelectView(h int) string {
 
 // orderEditView lists the monitors in their current order with the one being
 // moved marked, and redraws the arrangement preview after every move.
+// vrrSelectView lists the VRR options; VRR has no spatial effect, so the
+// preview simply keeps the arrangement visible for context.
+func (m tuiModel) vrrSelectView(h int) string {
+	title := "Select VRR"
+	if mon, ok := m.editedMonitor(); ok {
+		title = "Select VRR for " + mon.Name
+	}
+
+	var b strings.Builder
+	b.WriteString("\n  " + ui.Title.Render(title) + "\n\n")
+	b.WriteString(m.list.View())
+
+	body := m.appendPreviewSection(b.String(), m.activeConfigs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))
+	return lipgloss.NewStyle().Height(h).Render(body)
+}
+
 func (m tuiModel) orderEditView(h int) string {
 	var b strings.Builder
 	b.WriteString("\n  " + ui.Title.Render("Reorder monitors") + "\n\n")
