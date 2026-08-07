@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"strconv"
 	"strings"
 )
 
@@ -22,35 +19,6 @@ const (
 	layoutQuit             = 6
 )
 
-func promptLayoutSelection(r io.Reader, w io.Writer) (layoutOption, error) {
-	options := layoutOptions()
-	reader := bufio.NewReader(r)
-
-	for {
-		fmt.Fprint(w, renderLayoutOptions(options))
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && strings.TrimSpace(input) != "" {
-				selection, parseErr := parseLayoutSelection(input, options)
-				if parseErr == nil {
-					return selection, nil
-				}
-			}
-
-			return layoutOption{}, err
-		}
-
-		selection, err := parseLayoutSelection(input, options)
-		if err != nil {
-			fmt.Fprintf(w, "Invalid selection: %v\n\n", err)
-			continue
-		}
-
-		return selection, nil
-	}
-}
-
 func layoutOptions() []layoutOption {
 	return []layoutOption{
 		{ID: layoutLaptopOnly, Name: "Laptop only"},
@@ -60,26 +28,6 @@ func layoutOptions() []layoutOption {
 		{ID: layoutMirror, Name: "Mirror all displays"},
 		{ID: layoutQuit, Name: "Quit"},
 	}
-}
-
-func parseLayoutSelection(input string, options []layoutOption) (layoutOption, error) {
-	value := strings.TrimSpace(input)
-	if value == "" {
-		return layoutOption{}, fmt.Errorf("enter a number between 1 and %d", len(options))
-	}
-
-	choice, err := strconv.Atoi(value)
-	if err != nil {
-		return layoutOption{}, fmt.Errorf("enter a valid number")
-	}
-
-	for _, option := range options {
-		if option.ID == choice {
-			return option, nil
-		}
-	}
-
-	return layoutOption{}, fmt.Errorf("enter a number between 1 and %d", len(options))
 }
 
 func activeIndexesForLayout(monitors []monitor, layoutID int) ([]int, error) {

@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 )
@@ -50,46 +48,6 @@ func appendKeywordPairs(line string, config activeMonitorConfig) string {
 	return line
 }
 
-func promptLayoutDirection(r io.Reader, w io.Writer) (layoutDirection, error) {
-	reader := bufio.NewReader(r)
-
-	for {
-		fmt.Fprint(w, renderLayoutDirections())
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && strings.TrimSpace(input) != "" {
-				return parseLayoutDirection(input)
-			}
-
-			return "", err
-		}
-
-		direction, parseErr := parseLayoutDirection(input)
-		if parseErr != nil {
-			fmt.Fprintf(w, "Invalid selection: %v\n\n", parseErr)
-			continue
-		}
-
-		return direction, nil
-	}
-}
-
-func parseLayoutDirection(input string) (layoutDirection, error) {
-	switch strings.TrimSpace(input) {
-	case "1":
-		return leftToRight, nil
-	case "2":
-		return rightToLeft, nil
-	case "3":
-		return topToBottom, nil
-	case "4":
-		return bottomToTop, nil
-	default:
-		return "", fmt.Errorf("enter a number between 1 and 4")
-	}
-}
-
 // parseDirectionName parses the flag-facing direction names used by
 // `quick --direction`.
 func parseDirectionName(value string) (layoutDirection, error) {
@@ -104,31 +62,6 @@ func parseDirectionName(value string) (layoutDirection, error) {
 		return bottomToTop, nil
 	default:
 		return "", fmt.Errorf("unknown direction %q (use left-right, right-left, top-bottom, or bottom-top)", value)
-	}
-}
-
-func promptMonitorOrder(r io.Reader, w io.Writer, monitors []monitor, activeConfigs []activeMonitorConfig) ([]activeMonitorConfig, error) {
-	reader := bufio.NewReader(r)
-
-	for {
-		fmt.Fprint(w, renderMonitorOrderPrompt(monitors, activeConfigs))
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && strings.TrimSpace(input) != "" {
-				return reorderActiveConfigs(strings.TrimSpace(input), activeConfigs)
-			}
-
-			return nil, err
-		}
-
-		ordered, parseErr := reorderActiveConfigs(strings.TrimSpace(input), activeConfigs)
-		if parseErr != nil {
-			fmt.Fprintf(w, "Invalid selection: %v\n\n", parseErr)
-			continue
-		}
-
-		return ordered, nil
 	}
 }
 

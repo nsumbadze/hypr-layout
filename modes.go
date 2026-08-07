@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,68 +13,6 @@ type monitorMode struct {
 	Width       int
 	Height      int
 	RefreshRate float64
-}
-
-func promptMonitorModes(r io.Reader, w io.Writer, monitors []monitor, activeIndexes []int) (map[int]monitorMode, error) {
-	reader := bufio.NewReader(r)
-	selected := make(map[int]monitorMode, len(activeIndexes))
-
-	for _, idx := range activeIndexes {
-		mon := monitors[idx]
-		current := currentMonitorMode(mon)
-		modes := availableMonitorModes(mon)
-
-		if len(modes) == 0 {
-			selected[idx] = current
-			continue
-		}
-
-		for {
-			fmt.Fprint(w, renderMonitorModes(mon, current, modes))
-
-			input, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					choice := strings.TrimSpace(input)
-					if choice == "" {
-						selected[idx] = current
-						break
-					}
-				}
-
-				return nil, err
-			}
-
-			mode, parseErr := parseMonitorModeSelection(input, modes, current)
-			if parseErr != nil {
-				fmt.Fprintf(w, "Invalid selection: %v\n\n", parseErr)
-				continue
-			}
-
-			selected[idx] = mode
-			break
-		}
-	}
-
-	return selected, nil
-}
-
-func parseMonitorModeSelection(input string, modes []monitorMode, current monitorMode) (monitorMode, error) {
-	value := strings.TrimSpace(input)
-	if value == "" {
-		return current, nil
-	}
-
-	choice, err := strconv.Atoi(value)
-	if err != nil {
-		return monitorMode{}, fmt.Errorf("enter a valid number")
-	}
-
-	if choice < 1 || choice > len(modes) {
-		return monitorMode{}, fmt.Errorf("enter a number between 1 and %d", len(modes))
-	}
-
-	return modes[choice-1], nil
 }
 
 // modeStrategy names an automatic mode-selection rule, mirroring Hyprland's

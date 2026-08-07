@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,38 +61,6 @@ func parseProfileMetadata(content string) profileMetadata {
 	}
 
 	return meta
-}
-
-func promptSaveProfileConfirmation(r io.Reader, w io.Writer) (bool, error) {
-	return promptYesNo(r, w, "\nSave this layout as a profile? (y/n) ")
-}
-
-func promptProfileName(r io.Reader, w io.Writer) (string, error) {
-	reader := bufio.NewReader(r)
-
-	for {
-		fmt.Fprint(w, "Profile name: ")
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && strings.TrimSpace(input) != "" {
-				name := strings.TrimSpace(input)
-				if validateErr := validateProfileName(name); validateErr == nil {
-					return name, nil
-				}
-			}
-
-			return "", err
-		}
-
-		name := strings.TrimSpace(input)
-		if err := validateProfileName(name); err != nil {
-			fmt.Fprintf(w, "Invalid profile name: %v\n", err)
-			continue
-		}
-
-		return name, nil
-	}
 }
 
 func defaultProfilesDir() (string, error) {

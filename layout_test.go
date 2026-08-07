@@ -2,19 +2,6 @@ package main
 
 import "testing"
 
-func TestParseLayoutSelection(t *testing.T) {
-	options := layoutOptions()
-
-	selection, err := parseLayoutSelection("3\n", options)
-	if err != nil {
-		t.Fatalf("parseLayoutSelection returned error: %v", err)
-	}
-
-	if selection.ID != 3 || selection.Name != "Dual horizontal" {
-		t.Fatalf("unexpected selection: %+v", selection)
-	}
-}
-
 func TestActiveIndexesForLayoutDualHorizontal(t *testing.T) {
 	monitors := []monitor{
 		{Name: "eDP-1", Width: 2880, Height: 1800, RefreshRate: 120, Scale: 1.5},
