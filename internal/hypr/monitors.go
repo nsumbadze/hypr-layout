@@ -1,3 +1,5 @@
+// Package hypr is the interface to a running Hyprland session: reading the
+// current monitors from hyprctl and asking it to reload its config.
 package hypr
 
 import (

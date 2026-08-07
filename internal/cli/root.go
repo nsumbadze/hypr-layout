@@ -1,3 +1,5 @@
+// Package cli is the command line: subcommand dispatch and the
+// non-interactive flows for quick presets and saved profiles.
 package cli
 
 import (

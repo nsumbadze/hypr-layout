@@ -1,3 +1,6 @@
+// Package tui is the interactive wizard. Picking a layout lands on a review
+// screen where every setting already holds a sensible default, so applying
+// takes one key and editors are opened only for what needs changing.
 package tui
 
 import (

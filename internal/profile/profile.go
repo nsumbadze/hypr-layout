@@ -1,3 +1,5 @@
+// Package profile stores named layouts as readable config files with a small
+// comment header, and bundles them for export and import.
 package profile
 
 import (

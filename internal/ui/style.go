@@ -1,3 +1,5 @@
+// Package ui holds the colour palette and text helpers shared by the command
+// line output and the wizard, so nothing else hardcodes a colour.
 package ui
 
 import "github.com/charmbracelet/lipgloss"

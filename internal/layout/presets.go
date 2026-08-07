@@ -1,3 +1,7 @@
+// Package layout turns a set of monitors and a few choices — which monitors
+// are active, their modes, rotation, VRR, and how they are arranged — into the
+// lines of a Hyprland monitor config. It is the shared core behind both the
+// wizard and the quick presets, and knows nothing about either.
 package layout
 
 import (

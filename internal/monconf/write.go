@@ -1,3 +1,5 @@
+// Package monconf writes the generated monitor config to disk. Every write
+// backs up whatever was there before, so a failed reload can be rolled back.
 package monconf
 
 import (
