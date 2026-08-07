@@ -2,7 +2,7 @@
 
 A TUI for managing Hyprland monitor layouts, so I don't have to hand-edit `~/.config/hypr/monitors.conf` every time I plug something in.
 
-It reads your monitors from `hyprctl`, walks you through layout, resolution, rotation and ordering with a live preview of the arrangement, then writes the config safely — your old file gets backed up, and if the reload fails it rolls back automatically.
+It reads your monitors from `hyprctl`, drops you on a single review screen with every setting already filled in, and lets you change only what you care about with a live preview of the arrangement. Applying writes the config safely — your old file gets backed up, and if the reload fails it rolls back automatically.
 
 ## Screenshots
 
@@ -17,9 +17,11 @@ It reads your monitors from `hyprctl`, walks you through layout, resolution, rot
 - Monitor detection straight from `hyprctl monitors -j`
 - Layout presets: laptop only, external only, dual, triple, mirror
 - Per-monitor mode selection, with `preferred` / `highres` / `highrr` shortcuts
+- Opens on your current settings, with pending changes highlighted
+- One flat settings list — `enter` changes whatever is highlighted, and that is the only editing key
 - Rotation (transform) and VRR per monitor — 90°/270° rotations are accounted for in positioning
 - Stack monitors in any of the four directions, in any order
-- Live proportional preview on every screen of the wizard
+- Live proportional preview on every screen
 - Timestamped backups and automatic rollback if `hyprctl reload` fails
 - Named profiles you can apply later, plus export/import of all profiles as one JSON file
 - `quick` presets for scripts — fully non-interactive with `--yes`
@@ -29,7 +31,7 @@ It reads your monitors from `hyprctl`, walks you through layout, resolution, rot
 Needs Go 1.26+ and a running Hyprland session.
 
 ```bash
-go install github.com/nsumbadze/hypr-layout@latest
+go install github.com/nsumbadze/hypr-layout/cmd/hypr-layout@latest
 ```
 
 Or build from source:
@@ -37,7 +39,7 @@ Or build from source:
 ```bash
 git clone https://github.com/nsumbadze/hypr-layout.git
 cd hypr-layout
-go build .
+make build
 ```
 
 Make sure your Hyprland config sources the file this tool writes:
@@ -48,7 +50,52 @@ source = ~/.config/hypr/monitors.conf
 
 ## Usage
 
-Run `hypr-layout` with no arguments to start the wizard. Navigate with `↑`/`↓` (or `j`/`k`), select with `enter`, go back with `esc`, quit with `q`. Nothing is written until you confirm at the end.
+Run `hypr-layout` with no arguments. Pick a layout, and you land on the review
+screen — one flat list where every row is a single named setting:
+
+```
+  DP-1
+    Mode       2560x1440@165
+  ▸ Rotation   Normal
+    VRR        Off
+
+  HDMI-A-2
+    Mode       2560x1440@144
+    Rotation   Normal
+    VRR        Off
+
+  Layout
+    Direction  Left → right
+    Order      DP-1 → HDMI-A-2
+
+  Actions
+    Save as profile
+    Show config
+```
+
+Every row starts at what the monitor is running right now, so the screen reads
+as your current setup rather than a proposed new one. Anything you change is
+highlighted, so the highlights are exactly your pending changes. A live preview
+of the arrangement sits below the list and updates as you go.
+
+There are four keys:
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓` (or `k`/`j`) | move between settings |
+| `enter` | change the highlighted setting |
+| `a` | apply — write the config and reload Hyprland |
+| `q` | quit |
+
+`enter` always means the same thing: change this one setting. It opens a list
+for modes, rotation, VRR and direction; the reorder screen for `Order`; and
+runs the two `Actions` rows. `esc` goes back from anywhere.
+
+On the reorder screen, `shift`+`↑`/`↓` moves the highlighted monitor and the
+preview follows along; `enter` keeps the new order and `esc` discards it.
+
+Nothing is written until you press `a`. The previous `monitors.conf` is backed
+up first, and a failed reload rolls back automatically.
 
 ### Quick presets
 
@@ -105,10 +152,29 @@ Before writing, the existing `monitors.conf` is copied to `monitors.conf.backup-
 ## Development
 
 ```bash
+make build   # build ./cmd/hypr-layout
+make run     # run it
 make check   # fmt + vet + tests
 ```
 
 Standard library plus the Charm stack (Bubble Tea, Lip Gloss) for the TUI. PRs welcome — keep changes small and covered by tests.
+
+### Layout
+
+```
+cmd/hypr-layout      entry point
+internal/hypr        hyprctl: monitor detection and reload
+internal/layout      layout presets, modes, positioning
+internal/monconf     writing monitors.conf, backup and rollback
+internal/profile     saved profiles and import/export bundles
+internal/cli         subcommands and non-interactive output
+internal/tui         the wizard
+internal/ui          shared styles and text helpers
+```
+
+`internal/layout` is where the real logic lives: it turns a set of monitors and
+choices into config lines, and has no idea whether it was driven by the TUI or
+by `quick`. Both front ends go through it, so they cannot drift.
 
 ## License
 
