@@ -2,7 +2,7 @@
 
 A TUI for managing Hyprland monitor layouts, so I don't have to hand-edit `~/.config/hypr/monitors.conf` every time I plug something in.
 
-It reads your monitors from `hyprctl`, walks you through layout, resolution, rotation and ordering with a live preview of the arrangement, then writes the config safely — your old file gets backed up, and if the reload fails it rolls back automatically.
+It reads your monitors from `hyprctl`, drops you on a single review screen with every setting already filled in, and lets you change only what you care about with a live preview of the arrangement. Applying writes the config safely — your old file gets backed up, and if the reload fails it rolls back automatically.
 
 ## Screenshots
 
@@ -17,9 +17,10 @@ It reads your monitors from `hyprctl`, walks you through layout, resolution, rot
 - Monitor detection straight from `hyprctl monitors -j`
 - Layout presets: laptop only, external only, dual, triple, mirror
 - Per-monitor mode selection, with `preferred` / `highres` / `highrr` shortcuts
+- Sensible defaults everywhere, so a layout can be applied without opening a single editor
 - Rotation (transform) and VRR per monitor — 90°/270° rotations are accounted for in positioning
 - Stack monitors in any of the four directions, in any order
-- Live proportional preview on every screen of the wizard
+- Live proportional preview on every screen
 - Timestamped backups and automatic rollback if `hyprctl reload` fails
 - Named profiles you can apply later, plus export/import of all profiles as one JSON file
 - `quick` presets for scripts — fully non-interactive with `--yes`
@@ -48,7 +49,37 @@ source = ~/.config/hypr/monitors.conf
 
 ## Usage
 
-Run `hypr-layout` with no arguments to start the wizard. Navigate with `↑`/`↓` (or `j`/`k`), select with `enter`, go back with `esc`, quit with `q`. Nothing is written until you confirm at the end.
+Run `hypr-layout` with no arguments. Pick a layout, and you land on the review screen:
+
+```
+  ▸ DP-1       2560x1440@165     Normal     vrr off
+    HDMI-A-2   1920x1080@60      Normal     vrr off
+
+    Direction  Left → right
+    Order      DP-1 → HDMI-A-2
+```
+
+Every row already holds a sensible default — highest refresh rate, the monitor's
+current rotation and VRR, left-to-right order — so you can apply straight away
+and only open an editor for what you actually want to change.
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓` (or `k`/`j`) | move between rows |
+| `enter` | edit the highlighted row — mode, direction, or reorder |
+| `r` | rotation for the highlighted monitor |
+| `v` | cycle its VRR: off → on → fullscreen |
+| `c` | show the exact config that will be written |
+| `s` | save the layout as a named profile |
+| `a` | apply — write the config and reload Hyprland |
+| `w` | write the config without reloading |
+| `esc` | back |
+| `q` | quit |
+
+On the reorder screen, `shift`+`↑`/`↓` moves the highlighted monitor and the
+preview follows along; `enter` keeps the new order and `esc` discards it.
+
+Nothing is written until you press `a` or `w`.
 
 ### Quick presets
 

@@ -19,25 +19,35 @@ import (
 
 type tuiState int
 
+// The wizard is two screens deep: pick a layout, then land on the review hub
+// where every setting already has a sensible default. Editor states are only
+// ever reached from the hub and always return to it, so there is no long
+// chain of steps to walk back through.
 const (
 	tuiDetecting tuiState = iota
 	tuiLayoutSelect
+	tuiReview
 	tuiModeSelect
-	tuiSettingsConfirm
 	tuiTransformSelect
-	tuiVRRSelect
 	tuiDirectionSelect
-	tuiOrderInput
-	tuiPreview
-	tuiSaveConfirm
+	tuiOrderEdit
+	tuiConfigView
 	tuiProfileName
-	tuiApplyConfirm
 	tuiApplying
-	tuiReloadConfirm
 	tuiReloading
 	tuiDone
 	tuiErr
 )
+
+// editorStates are the states opened from the review hub; escape returns to it.
+func isEditorState(s tuiState) bool {
+	switch s {
+	case tuiModeSelect, tuiTransformSelect, tuiDirectionSelect,
+		tuiOrderEdit, tuiConfigView, tuiProfileName:
+		return true
+	}
+	return false
+}
 
 // ── messages ─────────────────────────────────────────────────────────────────
 
@@ -113,23 +123,35 @@ func (i settingListItem) FilterValue() string { return i.label }
 // ── key map ───────────────────────────────────────────────────────────────────
 
 type tuiKeyMap struct {
-	Up    key.Binding
-	Down  key.Binding
-	Enter key.Binding
-	Yes   key.Binding
-	No    key.Binding
-	Back  key.Binding
-	Quit  key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Enter    key.Binding
+	MoveUp   key.Binding
+	MoveDown key.Binding
+	Rotate   key.Binding
+	VRR      key.Binding
+	Apply    key.Binding
+	Write    key.Binding
+	Save     key.Binding
+	Config   key.Binding
+	Back     key.Binding
+	Quit     key.Binding
 }
 
 var tuiKeys = tuiKeyMap{
-	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-	Yes:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
-	No:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
-	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
-	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+	Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+	Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	MoveUp:   key.NewBinding(key.WithKeys("shift+up", "K"), key.WithHelp("shift+↑", "move up")),
+	MoveDown: key.NewBinding(key.WithKeys("shift+down", "J"), key.WithHelp("shift+↓", "move down")),
+	Rotate:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rotate")),
+	VRR:      key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "vrr")),
+	Apply:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply")),
+	Write:    key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "write only")),
+	Save:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save profile")),
+	Config:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "view config")),
+	Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 // ── model ─────────────────────────────────────────────────────────────────────
@@ -140,16 +162,24 @@ type tuiModel struct {
 	height int
 
 	// pipeline data
-	monitors           []monitor
-	activeIndexes      []int
-	selectedModes      map[int]monitorMode
-	direction          layoutDirection
-	activeConfigs      []activeMonitorConfig
-	configLines        []string
-	applyResult        applyResult
-	currentModeIdx     int
-	currentSettingsIdx int
-	mirrored           bool
+	monitors      []monitor
+	activeIndexes []int
+	direction     layoutDirection
+	activeConfigs []activeMonitorConfig
+	configLines   []string
+	applyResult   applyResult
+	mirrored      bool
+
+	// review hub state
+	reviewCursor int
+	// editIdx is the activeConfigs entry an editor screen is acting on: the
+	// monitor whose mode or rotation is being picked, or the row being moved
+	// on the reorder screen.
+	editIdx int
+	// orderBackup restores the pre-edit order when reordering is cancelled.
+	orderBackup []activeMonitorConfig
+	// reloadAfterWrite distinguishes "apply" from "write only".
+	reloadAfterWrite bool
 
 	// components
 	spinner   spinner.Model
@@ -174,10 +204,9 @@ func newTUIModel() tuiModel {
 	ti.PlaceholderStyle = styleDimmed
 
 	return tuiModel{
-		state:         tuiDetecting,
-		spinner:       s,
-		textInput:     ti,
-		selectedModes: make(map[int]monitorMode),
+		state:     tuiDetecting,
+		spinner:   s,
+		textInput: ti,
 	}
 }
 
@@ -249,8 +278,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				styleDimmed.Render("  Backup: "+msg.result.BackupPath),
 			)
 		}
-		m.state = tuiReloadConfirm
-		return m, nil
+		if !m.reloadAfterWrite {
+			m.statusLines = append(m.statusLines,
+				styleDimmed.Render("  Run ")+styleAccent.Render("hyprctl reload")+styleDimmed.Render(" to apply."),
+			)
+			m.state = tuiDone
+			return m, nil
+		}
+		return m.startReload()
 
 	case reloadDoneMsg:
 		if msg.err != nil {
@@ -265,42 +300,37 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case profileSavedMsg:
+		// A failed save keeps the name screen open so the name can be fixed;
+		// a successful one drops straight back to the hub.
 		if msg.err != nil {
 			m.inputErr = "Failed to save profile: " + msg.err.Error()
-		} else {
-			m.statusLines = append(m.statusLines,
-				styleSuccess.Render("✓")+"  Profile saved.",
-			)
+			return m, nil
 		}
-		m.state = tuiApplyConfirm
+		m.textInput.Blur()
+		m.statusLines = append(m.statusLines,
+			styleSuccess.Render("✓")+"  Profile saved.",
+		)
+		m.state = tuiReview
 		return m, nil
 	}
 
 	switch m.state {
 	case tuiLayoutSelect:
 		return m.updateLayoutSelect(msg)
+	case tuiReview:
+		return m.updateReview(msg)
 	case tuiModeSelect:
 		return m.updateModeSelect(msg)
-	case tuiSettingsConfirm:
-		return m.updateSettingsConfirm(msg)
 	case tuiTransformSelect:
 		return m.updateTransformSelect(msg)
-	case tuiVRRSelect:
-		return m.updateVRRSelect(msg)
 	case tuiDirectionSelect:
 		return m.updateDirectionSelect(msg)
-	case tuiOrderInput:
-		return m.updateOrderInput(msg)
-	case tuiPreview:
-		return m.updatePreview(msg)
-	case tuiSaveConfirm:
-		return m.updateSaveConfirm(msg)
+	case tuiOrderEdit:
+		return m.updateOrderEdit(msg)
+	case tuiConfigView:
+		return m.updateConfigView(msg)
 	case tuiProfileName:
 		return m.updateProfileName(msg)
-	case tuiApplyConfirm:
-		return m.updateApplyConfirm(msg)
-	case tuiReloadConfirm:
-		return m.updateReloadConfirm(msg)
 	case tuiDone, tuiErr:
 		if _, ok := msg.(tea.KeyMsg); ok {
 			return m, tea.Quit
@@ -311,6 +341,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // ── state update helpers ──────────────────────────────────────────────────────
+
+// defaultModeSelections picks each active monitor's starting mode: the highest
+// refresh rate available, matching the `quick` command's default. Every
+// setting on the review hub starts from a default like this, so nothing has to
+// be chosen before the layout can be applied.
+func defaultModeSelections(monitors []monitor, activeIndexes []int) map[int]monitorMode {
+	modes := make(map[int]monitorMode, len(activeIndexes))
+	for _, idx := range activeIndexes {
+		modes[idx] = resolveModeStrategy(monitors[idx], modeStrategyHighrr)
+	}
+	return modes
+}
 
 func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
@@ -328,64 +370,185 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.activeIndexes = indexes
-		m.currentModeIdx = 0
 		m.mirrored = item.opt.ID == layoutMirror
-		return m.advanceModeSelect()
+		m.direction = leftToRight
+		m.activeConfigs = buildActiveMonitorConfigs(m.monitors, indexes, defaultModeSelections(m.monitors, indexes))
+		m.reviewCursor = 0
+		m.state = tuiReview
+		m = m.resizeComponents()
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
 }
 
-// advanceModeSelect skips monitors with no available modes (auto-selecting current)
-// and either shows the next mode list or moves on to direction selection.
-func (m tuiModel) advanceModeSelect() (tuiModel, tea.Cmd) {
-	for m.currentModeIdx < len(m.activeIndexes) {
-		idx := m.activeIndexes[m.currentModeIdx]
-		mon := m.monitors[idx]
+// ── review hub ────────────────────────────────────────────────────────────────
+
+type reviewRowKind int
+
+const (
+	reviewRowMonitor reviewRowKind = iota
+	reviewRowDirection
+	reviewRowOrder
+)
+
+type reviewRow struct {
+	kind reviewRowKind
+	// idx is the activeConfigs entry a monitor row refers to.
+	idx int
+}
+
+// reviewRows lists the hub's editable rows. Mirrored layouts stack every
+// monitor on the same source, so they have no direction or order to set, and
+// a single monitor has nothing to reorder.
+func (m tuiModel) reviewRows() []reviewRow {
+	rows := make([]reviewRow, 0, len(m.activeConfigs)+2)
+	for i := range m.activeConfigs {
+		rows = append(rows, reviewRow{kind: reviewRowMonitor, idx: i})
+	}
+	if !m.mirrored {
+		rows = append(rows, reviewRow{kind: reviewRowDirection})
+		if len(m.activeConfigs) > 1 {
+			rows = append(rows, reviewRow{kind: reviewRowOrder})
+		}
+	}
+	return rows
+}
+
+func (m tuiModel) selectedReviewRow() (reviewRow, bool) {
+	rows := m.reviewRows()
+	if m.reviewCursor < 0 || m.reviewCursor >= len(rows) {
+		return reviewRow{}, false
+	}
+	return rows[m.reviewCursor], true
+}
+
+func (m tuiModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch {
+	case key.Matches(km, tuiKeys.Up):
+		if m.reviewCursor > 0 {
+			m.reviewCursor--
+		}
+	case key.Matches(km, tuiKeys.Down):
+		if m.reviewCursor < len(m.reviewRows())-1 {
+			m.reviewCursor++
+		}
+	case key.Matches(km, tuiKeys.Enter):
+		return m.openReviewEditor()
+	case key.Matches(km, tuiKeys.Rotate):
+		return m.openTransformEditor()
+	case key.Matches(km, tuiKeys.VRR):
+		return m.cycleVRR()
+	case key.Matches(km, tuiKeys.Config):
+		return m.openConfigView()
+	case key.Matches(km, tuiKeys.Save):
+		return m.openProfileName()
+	case key.Matches(km, tuiKeys.Apply):
+		return m.startApply(true)
+	case key.Matches(km, tuiKeys.Write):
+		return m.startApply(false)
+	}
+	return m, nil
+}
+
+// openReviewEditor opens the editor for the highlighted row: mode for a
+// monitor, direction or reorder for the layout rows.
+func (m tuiModel) openReviewEditor() (tea.Model, tea.Cmd) {
+	row, ok := m.selectedReviewRow()
+	if !ok {
+		return m, nil
+	}
+	switch row.kind {
+	case reviewRowMonitor:
+		mon := m.monitors[m.activeConfigs[row.idx].Index]
 		modes := availableMonitorModes(mon)
 		if len(modes) == 0 {
-			m.selectedModes[idx] = currentMonitorMode(mon)
-			m.currentModeIdx++
-			continue
+			return m, nil
 		}
+		m.editIdx = row.idx
 		m.state = tuiModeSelect
 		m.list = m.makeModeList(mon, modes)
+		m.list.Select(modeListIdx(m.activeConfigs[row.idx].Mode, modes))
+		return m, nil
+
+	case reviewRowDirection:
+		m.state = tuiDirectionSelect
+		m.list = m.makeDirectionList()
+		m.list.Select(directionListIdx(m.direction))
+		return m, nil
+
+	case reviewRowOrder:
+		m.orderBackup = append([]activeMonitorConfig(nil), m.activeConfigs...)
+		m.editIdx = 0
+		m.state = tuiOrderEdit
 		return m, nil
 	}
-	// Build configs now so downstream screens (settings, live direction
-	// preview) have data on first arrival.
-	m.activeConfigs = buildActiveMonitorConfigs(m.monitors, m.activeIndexes, m.selectedModes)
-	m.state = tuiSettingsConfirm
 	return m, nil
 }
 
-// advanceSettings shows the transform screen for the current monitor, or
-// finishes the settings phase when every active monitor has been visited.
-func (m tuiModel) advanceSettings() (tuiModel, tea.Cmd) {
-	if m.currentSettingsIdx >= len(m.activeConfigs) {
-		return m.finishSettings()
+// openTransformEditor opens the rotation list for the highlighted monitor.
+func (m tuiModel) openTransformEditor() (tea.Model, tea.Cmd) {
+	row, ok := m.selectedReviewRow()
+	if !ok || row.kind != reviewRowMonitor {
+		return m, nil
 	}
+	m.editIdx = row.idx
 	m.state = tuiTransformSelect
-	m.list = m.makeTransformList(m.activeConfigs[m.currentSettingsIdx].Transform)
+	m.list = m.makeTransformList(m.activeConfigs[row.idx].Transform)
 	return m, nil
 }
 
-// finishSettings routes to the next wizard phase: direction selection for
-// positioned layouts, or straight to preview for mirrored layouts (which have
-// no direction or order).
-func (m tuiModel) finishSettings() (tuiModel, tea.Cmd) {
-	if m.mirrored {
-		m.configLines = renderMirroredConfigLines(m.monitors, m.activeConfigs, mirrorSourceIndex(m.monitors, m.activeIndexes))
-		m.state = tuiPreview
-		m = m.resizeComponents()
-		m.viewport.SetContent(strings.Join(m.configLines, "\n"))
+// cycleVRR steps the highlighted monitor through off → on → fullscreen. VRR
+// has only three values and no spatial effect, so it is cycled in place rather
+// than costing a screen of its own.
+func (m tuiModel) cycleVRR() (tea.Model, tea.Cmd) {
+	row, ok := m.selectedReviewRow()
+	if !ok || row.kind != reviewRowMonitor {
 		return m, nil
 	}
-	m.state = tuiDirectionSelect
-	m.list = m.makeDirectionList()
+	m.activeConfigs[row.idx].VRR = (m.activeConfigs[row.idx].VRR + 1) % 3
 	return m, nil
 }
+
+func (m tuiModel) openConfigView() (tea.Model, tea.Cmd) {
+	m.configLines = m.buildConfigLines()
+	m.state = tuiConfigView
+	m = m.resizeComponents()
+	m.viewport.SetContent(strings.Join(m.configLines, "\n"))
+	return m, nil
+}
+
+func (m tuiModel) openProfileName() (tea.Model, tea.Cmd) {
+	m.state = tuiProfileName
+	m.textInput.SetValue("")
+	m.textInput.Placeholder = "my-profile"
+	m.inputErr = ""
+	m.textInput.Focus()
+	return m, textinput.Blink
+}
+
+// backToReview returns from an editor screen to the hub.
+func (m tuiModel) backToReview() tuiModel {
+	m.state = tuiReview
+	m.inputErr = ""
+	m.textInput.Blur()
+	return m
+}
+
+// buildConfigLines renders the config for the current review state.
+func (m tuiModel) buildConfigLines() []string {
+	if m.mirrored {
+		return renderMirroredConfigLines(m.monitors, m.activeConfigs, mirrorSourceIndex(m.monitors, m.activeIndexes))
+	}
+	return renderPositionedConfigLines(m.monitors, m.activeConfigs, m.direction)
+}
+
+// ── editor screens ────────────────────────────────────────────────────────────
 
 func (m tuiModel) updateModeSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
@@ -393,28 +556,12 @@ func (m tuiModel) updateModeSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		m.selectedModes[m.activeIndexes[m.currentModeIdx]] = item.mode
-		m.currentModeIdx++
-		return m.advanceModeSelect()
+		m.activeConfigs[m.editIdx].Mode = item.mode
+		return m.backToReview(), nil
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
-}
-
-func (m tuiModel) updateSettingsConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
-	km, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch {
-	case key.Matches(km, tuiKeys.Yes):
-		m.currentSettingsIdx = 0
-		return m.advanceSettings()
-	case key.Matches(km, tuiKeys.No):
-		return m.finishSettings()
-	}
-	return m, nil
 }
 
 func (m tuiModel) updateTransformSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -423,25 +570,8 @@ func (m tuiModel) updateTransformSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		m.activeConfigs[m.currentSettingsIdx].Transform = item.value
-		m.state = tuiVRRSelect
-		m.list = m.makeVRRList(m.activeConfigs[m.currentSettingsIdx].VRR)
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
-}
-
-func (m tuiModel) updateVRRSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
-		item, ok := m.list.SelectedItem().(settingListItem)
-		if !ok {
-			return m, nil
-		}
-		m.activeConfigs[m.currentSettingsIdx].VRR = item.value
-		m.currentSettingsIdx++
-		return m.advanceSettings()
+		m.activeConfigs[m.editIdx].Transform = item.value
+		return m.backToReview(), nil
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
@@ -455,72 +585,54 @@ func (m tuiModel) updateDirectionSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.direction = item.dir
-		m.state = tuiOrderInput
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = orderPlaceholder(m.activeConfigs)
-		m.inputErr = ""
-		m.textInput.Focus()
-		return m, textinput.Blink
+		return m.backToReview(), nil
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
 }
 
-func (m tuiModel) updateOrderInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
-		ordered, err := reorderActiveConfigs(m.textInput.Value(), m.activeConfigs)
-		if err != nil {
-			m.inputErr = err.Error()
-			return m, nil
-		}
-		m.activeConfigs = ordered
-		m.configLines = renderPositionedConfigLines(m.monitors, m.activeConfigs, m.direction)
-		m.state = tuiPreview
-		m.inputErr = ""
-		m = m.resizeComponents()
-		m.viewport.SetContent(strings.Join(m.configLines, "\n"))
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m tuiModel) updatePreview(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok {
-		switch {
-		case key.Matches(km, tuiKeys.Yes):
-			m.state = tuiSaveConfirm
-			return m, nil
-		case key.Matches(km, tuiKeys.No):
-			m.state = tuiApplyConfirm
-			return m, nil
-		}
-	}
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
-}
-
-func (m tuiModel) updateSaveConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+// updateOrderEdit moves the highlighted monitor through the order with
+// shift+↑/↓, redrawing the live preview on every move.
+func (m tuiModel) updateOrderEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
 	}
 	switch {
-	case key.Matches(km, tuiKeys.Yes):
-		m.state = tuiProfileName
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = "my-profile"
-		m.inputErr = ""
-		m.textInput.Focus()
-		return m, textinput.Blink
-	case key.Matches(km, tuiKeys.No):
-		m.state = tuiApplyConfirm
-		return m, nil
+	case key.Matches(km, tuiKeys.MoveUp):
+		if m.editIdx > 0 {
+			m.activeConfigs[m.editIdx-1], m.activeConfigs[m.editIdx] = m.activeConfigs[m.editIdx], m.activeConfigs[m.editIdx-1]
+			m.editIdx--
+		}
+	case key.Matches(km, tuiKeys.MoveDown):
+		if m.editIdx < len(m.activeConfigs)-1 {
+			m.activeConfigs[m.editIdx+1], m.activeConfigs[m.editIdx] = m.activeConfigs[m.editIdx], m.activeConfigs[m.editIdx+1]
+			m.editIdx++
+		}
+	case key.Matches(km, tuiKeys.Up):
+		if m.editIdx > 0 {
+			m.editIdx--
+		}
+	case key.Matches(km, tuiKeys.Down):
+		if m.editIdx < len(m.activeConfigs)-1 {
+			m.editIdx++
+		}
+	case key.Matches(km, tuiKeys.Enter):
+		m.orderBackup = nil
+		return m.backToReview(), nil
 	}
 	return m, nil
+}
+
+func (m tuiModel) updateConfigView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok &&
+		(key.Matches(km, tuiKeys.Enter) || key.Matches(km, tuiKeys.Config)) {
+		return m.backToReview(), nil
+	}
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
 }
 
 func (m tuiModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -530,7 +642,7 @@ func (m tuiModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputErr = err.Error()
 			return m, nil
 		}
-		lines := m.configLines
+		lines := m.buildConfigLines()
 		meta := m.profileMetadata()
 		return m, func() tea.Msg {
 			dir, err := defaultProfilesDir()
@@ -545,68 +657,49 @@ func (m tuiModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m tuiModel) updateApplyConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
-	km, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch {
-	case key.Matches(km, tuiKeys.Yes):
-		m.state = tuiApplying
-		lines := m.configLines
-		return m, tea.Batch(
-			m.spinner.Tick,
-			func() tea.Msg {
-				path, err := defaultMonitorConfigPath()
-				if err != nil {
-					return configWrittenMsg{err: err}
-				}
-				result, err := applyMonitorConfig(path, lines, time.Now())
-				return configWrittenMsg{result: result, err: err}
-			},
-		)
-	case key.Matches(km, tuiKeys.No):
-		m.statusLines = append(m.statusLines, styleDimmed.Render("  No changes applied."))
-		m.state = tuiDone
-		return m, nil
-	}
-	return m, nil
+// ── apply ─────────────────────────────────────────────────────────────────────
+
+// startApply writes the config, then reloads Hyprland unless the user chose to
+// write only. There is no confirmation step: the previous file is backed up
+// first and a failed reload rolls back automatically.
+func (m tuiModel) startApply(reload bool) (tea.Model, tea.Cmd) {
+	m.reloadAfterWrite = reload
+	m.configLines = m.buildConfigLines()
+	m.state = tuiApplying
+	lines := m.configLines
+	return m, tea.Batch(
+		m.spinner.Tick,
+		func() tea.Msg {
+			path, err := defaultMonitorConfigPath()
+			if err != nil {
+				return configWrittenMsg{err: err}
+			}
+			result, err := applyMonitorConfig(path, lines, time.Now())
+			return configWrittenMsg{result: result, err: err}
+		},
+	)
 }
 
-func (m tuiModel) updateReloadConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
-	km, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch {
-	case key.Matches(km, tuiKeys.Yes):
-		m.state = tuiReloading
-		result := m.applyResult
-		return m, tea.Batch(
-			m.spinner.Tick,
-			func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				if err := reloadHyprland(ctx, systemCommandRunner); err != nil {
-					if rbErr := rollbackMonitorConfig(result); rbErr != nil {
-						return reloadDoneMsg{err: fmt.Errorf("reload failed: %v; rollback failed: %w", err, rbErr)}
-					}
-					if result.BackupPath != "" {
-						return reloadDoneMsg{err: fmt.Errorf("reload failed: %v; restored backup from %s", err, result.BackupPath)}
-					}
-					return reloadDoneMsg{err: fmt.Errorf("reload failed: %v; removed newly created config", err)}
+func (m tuiModel) startReload() (tea.Model, tea.Cmd) {
+	m.state = tuiReloading
+	result := m.applyResult
+	return m, tea.Batch(
+		m.spinner.Tick,
+		func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := reloadHyprland(ctx, systemCommandRunner); err != nil {
+				if rbErr := rollbackMonitorConfig(result); rbErr != nil {
+					return reloadDoneMsg{err: fmt.Errorf("reload failed: %v; rollback failed: %w", err, rbErr)}
 				}
-				return reloadDoneMsg{}
-			},
-		)
-	case key.Matches(km, tuiKeys.No):
-		m.statusLines = append(m.statusLines,
-			styleDimmed.Render("  Run ")+styleAccent.Render("hyprctl reload")+styleDimmed.Render(" manually to apply."),
-		)
-		m.state = tuiDone
-		return m, nil
-	}
-	return m, nil
+				if result.BackupPath != "" {
+					return reloadDoneMsg{err: fmt.Errorf("reload failed: %v; restored backup from %s", err, result.BackupPath)}
+				}
+				return reloadDoneMsg{err: fmt.Errorf("reload failed: %v; removed newly created config", err)}
+			}
+			return reloadDoneMsg{}
+		},
+	)
 }
 
 // ── view ──────────────────────────────────────────────────────────────────────
@@ -656,40 +749,28 @@ func (m tuiModel) stepLabel() string {
 		return "Detecting monitors"
 	case tuiLayoutSelect:
 		return "Select layout"
+	case tuiReview:
+		return "Review layout"
 	case tuiModeSelect:
-		if len(m.activeIndexes) > 0 && m.currentModeIdx < len(m.activeIndexes) {
-			mon := m.monitors[m.activeIndexes[m.currentModeIdx]]
-			return fmt.Sprintf("Mode for %s  (%d/%d)", mon.Name, m.currentModeIdx+1, len(m.activeIndexes))
+		if mon, ok := m.editedMonitor(); ok {
+			return "Mode for " + mon.Name
 		}
 		return "Select mode"
-	case tuiSettingsConfirm:
-		return "Display settings?"
 	case tuiTransformSelect:
-		if mon, ok := m.settingsMonitor(); ok {
-			return fmt.Sprintf("Rotation for %s  (%d/%d)", mon.Name, m.currentSettingsIdx+1, len(m.activeConfigs))
+		if mon, ok := m.editedMonitor(); ok {
+			return "Rotation for " + mon.Name
 		}
 		return "Rotation"
-	case tuiVRRSelect:
-		if mon, ok := m.settingsMonitor(); ok {
-			return fmt.Sprintf("VRR for %s  (%d/%d)", mon.Name, m.currentSettingsIdx+1, len(m.activeConfigs))
-		}
-		return "VRR"
 	case tuiDirectionSelect:
 		return "Layout direction"
-	case tuiOrderInput:
+	case tuiOrderEdit:
 		return "Monitor order"
-	case tuiPreview:
-		return "Preview"
-	case tuiSaveConfirm:
-		return "Save profile?"
+	case tuiConfigView:
+		return "Generated config"
 	case tuiProfileName:
 		return "Profile name"
-	case tuiApplyConfirm:
-		return "Apply?"
 	case tuiApplying:
 		return "Writing config…"
-	case tuiReloadConfirm:
-		return "Reload Hyprland?"
 	case tuiReloading:
 		return "Reloading…"
 	case tuiDone:
@@ -709,21 +790,48 @@ func (m tuiModel) footerHints() string {
 	switch m.state {
 	case tuiLayoutSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + acc("q") + " quit"
-	case tuiModeSelect, tuiTransformSelect, tuiVRRSelect, tuiDirectionSelect:
+	case tuiReview:
+		return m.reviewHints(sep)
+	case tuiModeSelect, tuiTransformSelect, tuiDirectionSelect:
 		return dim("↑/↓") + " navigate" + sep + acc("enter") + " select" + sep + back + sep + acc("q") + " quit"
-	case tuiOrderInput, tuiProfileName:
-		return acc("enter") + " confirm" + sep + back + sep + acc("q") + " quit"
-	case tuiPreview:
-		return dim("↑/↓") + " scroll" + sep + acc("y") + " save profile" + sep + acc("n") + " skip" + sep + back + sep + acc("q") + " quit"
-	case tuiSettingsConfirm, tuiSaveConfirm, tuiApplyConfirm:
-		return acc("y") + " yes" + sep + acc("n") + " no" + sep + back + sep + acc("q") + " quit"
-	case tuiReloadConfirm:
-		return acc("y") + " yes" + sep + acc("n") + " no" + sep + acc("q") + " quit"
+	case tuiOrderEdit:
+		return dim("↑/↓") + " select" + sep + acc("shift+↑/↓") + " move" + sep +
+			acc("enter") + " done" + sep + acc("esc") + " cancel"
+	case tuiConfigView:
+		return dim("↑/↓") + " scroll" + sep + back + sep + acc("q") + " quit"
+	case tuiProfileName:
+		return acc("enter") + " save" + sep + back + sep + acc("q") + " quit"
 	case tuiDone, tuiErr:
 		return dim("any key") + " exit"
 	default:
 		return ""
 	}
+}
+
+// reviewHints tailors the hub footer to the highlighted row, so the rotation
+// and VRR shortcuts only advertise themselves on the rows they act on. The hub
+// has more shortcuts than a narrow terminal can show, so the less essential
+// ones drop off rather than being truncated mid-word.
+func (m tuiModel) reviewHints(sep string) string {
+	acc := func(s string) string { return styleAccent.Render(s) }
+
+	always := []string{acc("enter") + " edit", acc("a") + " apply", acc("q") + " quit"}
+	optional := []string{acc("s") + " save", acc("c") + " config", acc("w") + " write"}
+	if row, ok := m.selectedReviewRow(); ok && row.kind == reviewRowMonitor {
+		optional = append([]string{acc("r") + " rotate", acc("v") + " vrr"}, optional...)
+	}
+	optional = append(optional, styleDimmed.Render("↑/↓")+" move")
+
+	// Keep "quit" last while dropping optional hints from the least useful end.
+	for n := len(optional); n >= 0; n-- {
+		parts := append(append([]string{}, always[:len(always)-1]...), optional[:n]...)
+		parts = append(parts, always[len(always)-1])
+		hints := strings.Join(parts, sep)
+		if n == 0 || lipgloss.Width(hints)+2 <= m.width {
+			return hints
+		}
+	}
+	return ""
 }
 
 func (m tuiModel) bodyView() string {
@@ -733,38 +841,22 @@ func (m tuiModel) bodyView() string {
 		return m.spinnerView(contentH, "Detecting monitors…")
 	case tuiLayoutSelect:
 		return m.layoutSelectView(contentH)
+	case tuiReview:
+		return m.reviewView(contentH)
 	case tuiModeSelect:
-		title := "Select mode"
-		if len(m.activeIndexes) > 0 && m.currentModeIdx < len(m.activeIndexes) {
-			mon := m.monitors[m.activeIndexes[m.currentModeIdx]]
-			title = fmt.Sprintf("Select mode for %s", mon.Name)
-			if len(m.activeIndexes) > 1 {
-				title += fmt.Sprintf("  %s", styleDimmed.Render(fmt.Sprintf("(%d of %d)", m.currentModeIdx+1, len(m.activeIndexes))))
-			}
-		}
-		return m.modeSelectView(contentH, title)
-	case tuiSettingsConfirm:
-		return m.yesNoView(contentH, "Adjust display settings (rotation, VRR)?")
+		return m.modeSelectView(contentH)
 	case tuiTransformSelect:
 		return m.transformSelectView(contentH)
-	case tuiVRRSelect:
-		return m.vrrSelectView(contentH)
 	case tuiDirectionSelect:
 		return m.directionSelectView(contentH)
-	case tuiOrderInput:
-		return m.orderInputView(contentH)
-	case tuiPreview:
-		return m.previewView(contentH)
-	case tuiSaveConfirm:
-		return m.yesNoView(contentH, "Save this layout as a profile?")
+	case tuiOrderEdit:
+		return m.orderEditView(contentH)
+	case tuiConfigView:
+		return m.configView(contentH)
 	case tuiProfileName:
 		return m.profileNameView(contentH)
-	case tuiApplyConfirm:
-		return m.yesNoView(contentH, "Apply this layout to ~/.config/hypr/monitors.conf?")
 	case tuiApplying:
 		return m.spinnerView(contentH, "Writing config…")
-	case tuiReloadConfirm:
-		return m.reloadConfirmView(contentH)
 	case tuiReloading:
 		return m.spinnerView(contentH, "Reloading Hyprland…")
 	case tuiDone:
@@ -793,26 +885,12 @@ func (m tuiModel) profileMetadata() profileMetadata {
 	return meta
 }
 
-// settingsMonitor returns the monitor whose settings are being edited.
-func (m tuiModel) settingsMonitor() (monitor, bool) {
-	if m.currentSettingsIdx < 0 || m.currentSettingsIdx >= len(m.activeConfigs) {
+// editedMonitor returns the monitor an editor screen is acting on.
+func (m tuiModel) editedMonitor() (monitor, bool) {
+	if m.editIdx < 0 || m.editIdx >= len(m.activeConfigs) {
 		return monitor{}, false
 	}
-	return m.monitors[m.activeConfigs[m.currentSettingsIdx].Index], true
-}
-
-// settingsScreenTitle builds a "<prefix> for <monitor>  (i of n)" title for the
-// transform and VRR screens.
-func (m tuiModel) settingsScreenTitle(prefix string) string {
-	mon, ok := m.settingsMonitor()
-	if !ok {
-		return prefix
-	}
-	title := prefix + " for " + mon.Name
-	if len(m.activeConfigs) > 1 {
-		title += "  " + styleDimmed.Render(fmt.Sprintf("(%d of %d)", m.currentSettingsIdx+1, len(m.activeConfigs)))
-	}
-	return title
+	return m.monitors[m.activeConfigs[m.editIdx].Index], true
 }
 
 // ── body sub-views ────────────────────────────────────────────────────────────
@@ -868,6 +946,119 @@ func (m tuiModel) mirrorSource(activeIndexes []int) int {
 	return mirrorSourceIndex(m.monitors, activeIndexes)
 }
 
+// transformLabels name the eight Hyprland transform values: 0-3 rotate
+// counter-clockwise in 90° steps, 4-7 are the same rotations of a flipped
+// (mirrored) image.
+var transformLabels = []string{
+	"Normal",
+	"90°",
+	"180°",
+	"270°",
+	"Flipped",
+	"Flipped + 90°",
+	"Flipped + 180°",
+	"Flipped + 270°",
+}
+
+func transformLabel(value int) string {
+	if value < 0 || value >= len(transformLabels) {
+		return "Normal"
+	}
+	return transformLabels[value]
+}
+
+func vrrLabel(value int) string {
+	switch value {
+	case 1:
+		return "vrr on"
+	case 2:
+		return "vrr fullscreen"
+	default:
+		return "vrr off"
+	}
+}
+
+// reviewView renders the hub: every monitor with its settings, then the
+// layout-wide direction and order, over a live preview of the arrangement.
+// Each row is already filled in with a default, so applying takes one key.
+func (m tuiModel) reviewView(h int) string {
+	var b strings.Builder
+	b.WriteString("\n")
+
+	rows := m.reviewRows()
+	nameW := m.reviewNameWidth()
+	for i, row := range rows {
+		selected := i == m.reviewCursor
+		b.WriteString(m.reviewRowLine(row, selected, nameW))
+		// Separate the monitor rows from the layout-wide rows below them.
+		if row.kind == reviewRowMonitor && i+1 < len(rows) && rows[i+1].kind != reviewRowMonitor {
+			b.WriteString("\n")
+		}
+	}
+
+	body := m.appendPreviewSection(b.String(), m.activeConfigs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))
+	return lipgloss.NewStyle().Height(h).Render(body)
+}
+
+// reviewNameWidth sizes the label column so monitor names and the Direction /
+// Order labels line up in one column.
+func (m tuiModel) reviewNameWidth() int {
+	w := len("Direction")
+	for _, cfg := range m.activeConfigs {
+		if n := len(m.monitors[cfg.Index].Name); n > w {
+			w = n
+		}
+	}
+	return w
+}
+
+func (m tuiModel) reviewRowLine(row reviewRow, selected bool, nameW int) string {
+	var label, value string
+	switch row.kind {
+	case reviewRowMonitor:
+		cfg := m.activeConfigs[row.idx]
+		label = m.monitors[cfg.Index].Name
+		value = fmt.Sprintf("%-16s  %-14s  %s",
+			formatMonitorMode(cfg.Mode), transformLabel(cfg.Transform), vrrLabel(cfg.VRR))
+	case reviewRowDirection:
+		label = "Direction"
+		value = directionLabel(m.direction)
+	case reviewRowOrder:
+		label = "Order"
+		value = m.orderSummary()
+	}
+
+	marker := "  "
+	labelStyle := styleBase
+	if selected {
+		marker = styleAccent.Render("▸ ")
+		labelStyle = styleSelected
+	}
+	return "  " + marker + labelStyle.Render(fmt.Sprintf("%-*s", nameW, label)) +
+		"  " + styleDimmed.Render(value) + "\n"
+}
+
+// orderSummary describes the current monitor order as a single line.
+func (m tuiModel) orderSummary() string {
+	names := make([]string, 0, len(m.activeConfigs))
+	for _, cfg := range m.activeConfigs {
+		names = append(names, m.monitors[cfg.Index].Name)
+	}
+	return strings.Join(names, " → ")
+}
+
+func directionLabel(d layoutDirection) string {
+	switch d {
+	case rightToLeft:
+		return "Right → left"
+	case topToBottom:
+		return "Top → bottom"
+	case bottomToTop:
+		return "Bottom → top"
+	}
+	return "Left → right"
+}
+
 func (m tuiModel) directionSelectView(h int) string {
 	var b strings.Builder
 	b.WriteString("\n  " + styleTitle.Render("Select layout direction") + "\n\n")
@@ -915,29 +1106,24 @@ func (m tuiModel) layoutSelectView(h int) string {
 	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
-func (m tuiModel) listView(h int, title string) string {
-	var b strings.Builder
-	b.WriteString("\n  " + styleTitle.Render(title) + "\n\n")
-	b.WriteString(m.list.View())
-	return lipgloss.NewStyle().Height(h).Render(b.String())
-}
-
 // modeSelectView shows the mode list with a live preview of the arrangement
 // using the highlighted mode for the monitor being configured.
-func (m tuiModel) modeSelectView(h int, title string) string {
+func (m tuiModel) modeSelectView(h int) string {
+	title := "Select mode"
+	if mon, ok := m.editedMonitor(); ok {
+		title = "Select mode for " + mon.Name
+	}
+
 	var b strings.Builder
 	b.WriteString("\n  " + styleTitle.Render(title) + "\n\n")
 	b.WriteString(m.list.View())
 
 	body := b.String()
-	if item, ok := m.list.SelectedItem().(modeListItem); ok && m.currentModeIdx < len(m.activeIndexes) {
-		hovered := make(map[int]monitorMode, len(m.selectedModes)+1)
-		for idx, mode := range m.selectedModes {
-			hovered[idx] = mode
-		}
-		hovered[m.activeIndexes[m.currentModeIdx]] = item.mode
-		configs := buildActiveMonitorConfigs(m.monitors, m.activeIndexes, hovered)
-		body = m.appendPreviewSection(body, configs, leftToRight, m.mirrored, m.mirrorSource(m.activeIndexes))
+	if item, ok := m.list.SelectedItem().(modeListItem); ok && m.editIdx < len(m.activeConfigs) {
+		configs := make([]activeMonitorConfig, len(m.activeConfigs))
+		copy(configs, m.activeConfigs)
+		configs[m.editIdx].Mode = item.mode
+		body = m.appendPreviewSection(body, configs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))
 	}
 
 	return lipgloss.NewStyle().Height(h).Render(body)
@@ -946,61 +1132,48 @@ func (m tuiModel) modeSelectView(h int, title string) string {
 // transformSelectView shows the rotation list with a live preview: hovering a
 // 90°/270° transform visibly swaps the monitor's box proportions.
 func (m tuiModel) transformSelectView(h int) string {
+	title := "Select rotation"
+	if mon, ok := m.editedMonitor(); ok {
+		title = "Select rotation for " + mon.Name
+	}
+
 	var b strings.Builder
-	b.WriteString("\n  " + styleTitle.Render(m.settingsScreenTitle("Select rotation")) + "\n\n")
+	b.WriteString("\n  " + styleTitle.Render(title) + "\n\n")
 	b.WriteString(m.list.View())
 
 	body := b.String()
-	if item, ok := m.list.SelectedItem().(settingListItem); ok && m.currentSettingsIdx < len(m.activeConfigs) {
+	if item, ok := m.list.SelectedItem().(settingListItem); ok && m.editIdx < len(m.activeConfigs) {
 		configs := make([]activeMonitorConfig, len(m.activeConfigs))
 		copy(configs, m.activeConfigs)
-		configs[m.currentSettingsIdx].Transform = item.value
-		body = m.appendPreviewSection(body, configs, leftToRight, m.mirrored, m.mirrorSource(m.activeIndexes))
+		configs[m.editIdx].Transform = item.value
+		body = m.appendPreviewSection(body, configs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))
 	}
 
 	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
-// vrrSelectView shows the VRR list; VRR has no spatial effect, so the preview
-// simply keeps the current arrangement visible for context.
-func (m tuiModel) vrrSelectView(h int) string {
+// orderEditView lists the monitors in their current order with the one being
+// moved marked, and redraws the arrangement preview after every move.
+func (m tuiModel) orderEditView(h int) string {
 	var b strings.Builder
-	b.WriteString("\n  " + styleTitle.Render(m.settingsScreenTitle("Select VRR")) + "\n\n")
-	b.WriteString(m.list.View())
-
-	body := m.appendPreviewSection(b.String(), m.activeConfigs, leftToRight, m.mirrored, m.mirrorSource(m.activeIndexes))
-	return lipgloss.NewStyle().Height(h).Render(body)
-}
-
-func (m tuiModel) orderInputView(h int) string {
-	var b strings.Builder
-	b.WriteString("\n  " + styleTitle.Render("Set monitor order") + "\n\n")
+	b.WriteString("\n  " + styleTitle.Render("Reorder monitors") + "\n\n")
 	for i, cfg := range m.activeConfigs {
 		mon := m.monitors[cfg.Index]
-		b.WriteString(fmt.Sprintf("  %s  %s  %s\n",
-			styleDimmed.Render(fmt.Sprintf("(%d)", i+1)),
-			styleBase.Render(mon.Name),
-			styleDimmed.Render(formatMonitorMode(cfg.Mode)),
-		))
-	}
-	b.WriteString("\n  " + styleMuted.Render("Enter indices separated by spaces:") + "\n")
-	b.WriteString("  " + m.textInput.View() + "\n")
-	if m.inputErr != "" {
-		b.WriteString("\n  " + styleErr.Render(m.inputErr) + "\n")
+		name := styleBase.Render(fmt.Sprintf("%-12s", mon.Name))
+		mode := styleDimmed.Render(formatMonitorMode(cfg.Mode))
+		if i == m.editIdx {
+			b.WriteString("  " + styleSelected.Render("▸ "+fmt.Sprintf("%-12s", mon.Name)) + "  " + mode + "  " + styleAccent.Render("↕") + "\n")
+			continue
+		}
+		b.WriteString("    " + name + "  " + mode + "\n")
 	}
 
-	// Live preview: when the typed order parses, show that arrangement;
-	// otherwise keep showing the current one.
-	ordered := m.activeConfigs
-	if parsed, err := reorderActiveConfigs(strings.TrimSpace(m.textInput.Value()), m.activeConfigs); err == nil {
-		ordered = parsed
-	}
-	body := m.appendPreviewSection(b.String(), ordered, m.direction, false, 0)
-
+	body := m.appendPreviewSection(b.String(), m.activeConfigs, m.direction, false, 0)
 	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
-func (m tuiModel) previewView(h int) string {
+// configView shows the exact lines that will be written to monitors.conf.
+func (m tuiModel) configView(h int) string {
 	inner := m.viewport.View()
 	boxWidth := m.width - 6
 	if boxWidth < 10 {
@@ -1009,43 +1182,11 @@ func (m tuiModel) previewView(h int) string {
 	box := stylePreviewBox.Copy().Width(boxWidth).Render(inner)
 
 	var b strings.Builder
-	b.WriteString("\n  " + styleTitle.Render("Config preview") + "\n\n")
+	b.WriteString("\n  " + styleTitle.Render("Will be written to monitors.conf") + "\n\n")
 	b.WriteString("  " + box + "\n")
-	b.WriteString("\n  " + styleMuted.Render("Save as profile?  ") +
-		styleAccent.Render("y") + styleDimmed.Render(" yes  ") +
-		styleAccent.Render("n") + styleDimmed.Render(" skip") + "\n")
 
 	body := m.appendPreviewSection(b.String(), m.activeConfigs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))
 	return lipgloss.NewStyle().Height(h).Render(body)
-}
-
-func (m tuiModel) yesNoView(h int, question string) string {
-	var b strings.Builder
-	b.WriteString("\n")
-	for _, line := range m.statusLines {
-		b.WriteString("  " + line + "\n")
-	}
-	if len(m.statusLines) > 0 {
-		b.WriteString("\n")
-	}
-	b.WriteString("  " + styleBase.Render(question) + "\n\n")
-	b.WriteString("  " + stylePromptGlyph.Render("❯ ") +
-		styleAccent.Render("y") + styleDimmed.Render("  /  ") +
-		styleAccent.Render("n") + "\n")
-	return lipgloss.NewStyle().Height(h).Render(b.String())
-}
-
-func (m tuiModel) reloadConfirmView(h int) string {
-	var b strings.Builder
-	b.WriteString("\n")
-	for _, line := range m.statusLines {
-		b.WriteString("  " + line + "\n")
-	}
-	b.WriteString("\n  " + styleBase.Render("Reload Hyprland now?") + "\n\n")
-	b.WriteString("  " + stylePromptGlyph.Render("❯ ") +
-		styleAccent.Render("y") + styleDimmed.Render("  /  ") +
-		styleAccent.Render("n") + "\n")
-	return lipgloss.NewStyle().Height(h).Render(b.String())
 }
 
 func (m tuiModel) profileNameView(h int) string {
@@ -1090,130 +1231,26 @@ func (m tuiModel) errView(h int) string {
 // ── back navigation ───────────────────────────────────────────────────────────
 
 // backAllowed returns true for states where pressing Escape navigates back.
-// States where a side-effect has already occurred (writing config, reloading)
-// or where there is no previous step (detecting, done, error) do not allow it.
+// Editor screens return to the review hub and the hub returns to the layout
+// list; states where a side-effect is in flight (writing, reloading) or where
+// there is nothing behind them (detecting, done, error) do not allow it.
 func backAllowed(s tuiState) bool {
-	switch s {
-	case tuiModeSelect, tuiSettingsConfirm, tuiTransformSelect, tuiVRRSelect,
-		tuiDirectionSelect, tuiOrderInput,
-		tuiPreview, tuiSaveConfirm, tuiProfileName, tuiApplyConfirm:
-		return true
-	}
-	return false
+	return s == tuiReview || isEditorState(s)
 }
 
 func (m tuiModel) goBack() (tuiModel, tea.Cmd) {
-	switch m.state {
-	case tuiModeSelect:
-		if m.currentModeIdx == 0 {
-			m.state = tuiLayoutSelect
-			m.list = m.makeLayoutList()
-			return m, nil
-		}
-		return m.rewindModeSelect()
-
-	case tuiSettingsConfirm:
-		return m.rewindToLastModeOrLayout()
-
-	case tuiTransformSelect:
-		if m.currentSettingsIdx == 0 {
-			m.state = tuiSettingsConfirm
-			return m, nil
-		}
-		m.currentSettingsIdx--
-		m.state = tuiVRRSelect
-		m.list = m.makeVRRList(m.activeConfigs[m.currentSettingsIdx].VRR)
-		return m, nil
-
-	case tuiVRRSelect:
-		m.state = tuiTransformSelect
-		m.list = m.makeTransformList(m.activeConfigs[m.currentSettingsIdx].Transform)
-		return m, nil
-
-	case tuiDirectionSelect:
-		m.state = tuiSettingsConfirm
-		return m, nil
-
-	case tuiOrderInput:
-		m.textInput.Blur()
-		m.inputErr = ""
-		m.state = tuiDirectionSelect
-		m.list = m.makeDirectionList()
-		m.list.Select(directionListIdx(m.direction))
-		return m, nil
-
-	case tuiPreview:
-		if m.mirrored {
-			m.state = tuiSettingsConfirm
-			return m, nil
-		}
-		m.state = tuiOrderInput
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = orderPlaceholder(m.activeConfigs)
-		m.inputErr = ""
-		m.textInput.Focus()
-		return m, textinput.Blink
-
-	case tuiSaveConfirm:
-		m.state = tuiPreview
-		return m, nil
-
-	case tuiProfileName:
-		m.textInput.Blur()
-		m.inputErr = ""
-		m.state = tuiSaveConfirm
-		return m, nil
-
-	case tuiApplyConfirm:
-		m.state = tuiPreview
+	if m.state == tuiReview {
+		m.state = tuiLayoutSelect
+		m.list = m.makeLayoutList()
 		return m, nil
 	}
-	return m, nil
-}
-
-// rewindModeSelect moves back to the previous monitor that has selectable modes,
-// skipping any monitors that were auto-selected (no available modes).
-// The list cursor is restored to the previously chosen mode for that monitor.
-func (m tuiModel) rewindModeSelect() (tuiModel, tea.Cmd) {
-	for i := m.currentModeIdx - 1; i >= 0; i-- {
-		idx := m.activeIndexes[i]
-		mon := m.monitors[idx]
-		if modes := availableMonitorModes(mon); len(modes) > 0 {
-			m.currentModeIdx = i
-			m.state = tuiModeSelect
-			m.list = m.makeModeList(mon, modes)
-			if prev, ok := m.selectedModes[idx]; ok {
-				m.list.Select(modeListIdx(prev, modes))
-			}
-			return m, nil
-		}
+	// Reordering mutates the live order as it goes, so cancelling has to put
+	// the pre-edit order back.
+	if m.state == tuiOrderEdit && m.orderBackup != nil {
+		m.activeConfigs = m.orderBackup
+		m.orderBackup = nil
 	}
-	// No previous monitor has selectable modes — go all the way back to layout.
-	m.state = tuiLayoutSelect
-	m.list = m.makeLayoutList()
-	return m, nil
-}
-
-// rewindToLastModeOrLayout moves back from direction select to the last
-// monitor that had selectable modes, or to layout select if all were auto-selected.
-// The list cursor is restored to the previously chosen mode for that monitor.
-func (m tuiModel) rewindToLastModeOrLayout() (tuiModel, tea.Cmd) {
-	for i := len(m.activeIndexes) - 1; i >= 0; i-- {
-		idx := m.activeIndexes[i]
-		mon := m.monitors[idx]
-		if modes := availableMonitorModes(mon); len(modes) > 0 {
-			m.currentModeIdx = i
-			m.state = tuiModeSelect
-			m.list = m.makeModeList(mon, modes)
-			if prev, ok := m.selectedModes[idx]; ok {
-				m.list.Select(modeListIdx(prev, modes))
-			}
-			return m, nil
-		}
-	}
-	m.state = tuiLayoutSelect
-	m.list = m.makeLayoutList()
-	return m, nil
+	return m.backToReview(), nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -1233,8 +1270,6 @@ func (m tuiModel) resizeComponents() tuiModel {
 		m.list.SetSize(m.width-4, m.modeListHeight(len(m.list.Items())))
 	case tuiTransformSelect:
 		m.list.SetSize(m.width-4, m.clampListHeight(transformListHeight, 0))
-	case tuiVRRSelect:
-		m.list.SetSize(m.width-4, m.clampListHeight(vrrListHeight, 0))
 	case tuiDirectionSelect:
 		m.list.SetSize(m.width-4, m.clampListHeight(directionListHeight, 0))
 	}
@@ -1278,7 +1313,6 @@ const modeShortcutCount = 3
 const (
 	layoutListHeight    = 7 // 6 layout options
 	transformListHeight = 9 // 8 transforms
-	vrrListHeight       = 4 // 3 VRR modes
 )
 
 // previewReserve is the vertical room kept free below variable-height lists
@@ -1336,34 +1370,12 @@ func (m tuiModel) makeModeList(mon monitor, modes []monitorMode) list.Model {
 // hyprland transform values: 0-3 rotate counter-clockwise in 90° steps,
 // 4-7 are the same rotations of a flipped (mirrored) image.
 func (m tuiModel) makeTransformList(current int) list.Model {
-	labels := []string{
-		"Normal",
-		"90°",
-		"180°",
-		"270°",
-		"Flipped",
-		"Flipped + 90°",
-		"Flipped + 180°",
-		"Flipped + 270°",
-	}
-	items := make([]list.Item, 0, len(labels))
-	for value, label := range labels {
+	items := make([]list.Item, 0, len(transformLabels))
+	for value, label := range transformLabels {
 		items = append(items, settingListItem{label: label, value: value, current: value == current})
 	}
 	l := m.newStyledList(items)
 	l.SetSize(m.width-4, m.clampListHeight(transformListHeight, 0))
-	l.Select(current)
-	return l
-}
-
-func (m tuiModel) makeVRRList(current int) list.Model {
-	items := []list.Item{
-		settingListItem{label: "Off", value: 0, current: current == 0},
-		settingListItem{label: "On", value: 1, current: current == 1},
-		settingListItem{label: "Fullscreen only", value: 2, current: current == 2},
-	}
-	l := m.newStyledList(items)
-	l.SetSize(m.width-4, m.clampListHeight(vrrListHeight, 0))
 	l.Select(current)
 	return l
 }
@@ -1375,11 +1387,9 @@ func (m tuiModel) makeVRRList(current int) list.Model {
 const directionListHeight = 5
 
 func (m tuiModel) makeDirectionList() list.Model {
-	items := []list.Item{
-		dirListItem{name: "Left → right", dir: leftToRight},
-		dirListItem{name: "Right → left", dir: rightToLeft},
-		dirListItem{name: "Top → bottom", dir: topToBottom},
-		dirListItem{name: "Bottom → top", dir: bottomToTop},
+	items := make([]list.Item, 0, 4)
+	for _, dir := range []layoutDirection{leftToRight, rightToLeft, topToBottom, bottomToTop} {
+		items = append(items, dirListItem{name: directionLabel(dir), dir: dir})
 	}
 	l := m.newStyledList(items)
 	l.SetSize(m.width-4, m.clampListHeight(directionListHeight, 0))
@@ -1439,12 +1449,4 @@ func modeListIdx(selected monitorMode, modes []monitorMode) int {
 		}
 	}
 	return 0
-}
-
-func orderPlaceholder(configs []activeMonitorConfig) string {
-	parts := make([]string, len(configs))
-	for i := range configs {
-		parts[i] = fmt.Sprintf("%d", i+1)
-	}
-	return strings.Join(parts, " ")
 }
