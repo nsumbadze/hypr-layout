@@ -23,8 +23,7 @@ func wizardTestModel(w, h int) tuiModel {
 	}
 	m.activeIndexes = []int{0, 1}
 	m.direction = layout.LeftToRight
-	m.activeConfigs = layout.BuildConfigs(m.monitors, m.activeIndexes,
-		defaultModeSelections(m.monitors, m.activeIndexes))
+	m.activeConfigs = layout.BuildConfigs(m.monitors, m.activeIndexes, nil)
 	m = m.resizeComponents()
 	return m
 }
@@ -149,9 +148,9 @@ func TestTransformHoverSwapsPreviewProportions(t *testing.T) {
 
 // ── review hub ────────────────────────────────────────────────────────────────
 
-// Picking a layout must land on the hub with every setting defaulted, so the
-// layout is applyable without visiting a single editor.
-func TestLayoutSelectionLandsOnReviewWithDefaults(t *testing.T) {
+// Picking a layout must land on the hub showing what the monitors are running
+// now — the wizard proposes nothing until the user changes something.
+func TestLayoutSelectionLandsOnReviewShowingCurrentSettings(t *testing.T) {
 	m := wizardTestModel(100, 40)
 	m.state = tuiLayoutSelect
 	m.list = m.makeLayoutList()
@@ -166,12 +165,49 @@ func TestLayoutSelectionLandsOnReviewWithDefaults(t *testing.T) {
 	if len(got.activeConfigs) != 2 {
 		t.Fatalf("expected 2 active configs, got %d", len(got.activeConfigs))
 	}
-	// Highest refresh rate is the default, matching `quick`'s "best" mode.
-	if rr := got.activeConfigs[0].Mode.RefreshRate; rr != 165 {
-		t.Fatalf("expected DP-1 to default to 165Hz, got %v", rr)
+	for _, cfg := range got.activeConfigs {
+		mon := got.monitors[cfg.Index]
+		if cfg.Mode != layout.CurrentMode(mon) {
+			t.Fatalf("%s: expected the current mode %v, got %v",
+				mon.Name, layout.CurrentMode(mon), cfg.Mode)
+		}
+		if cfg.Transform != mon.Transform {
+			t.Fatalf("%s: expected the current rotation %d, got %d", mon.Name, mon.Transform, cfg.Transform)
+		}
+		if cfg.VRR != currentVRR(mon) {
+			t.Fatalf("%s: expected the current VRR %d, got %d", mon.Name, currentVRR(mon), cfg.VRR)
+		}
 	}
 	if got.direction != layout.LeftToRight {
 		t.Fatalf("expected default direction left→right, got %q", got.direction)
+	}
+}
+
+// Applying straight off the hub must reproduce the monitors' current modes, so
+// an accidental apply is a no-op rather than a surprise mode change.
+func TestApplyingWithoutEditingKeepsCurrentModes(t *testing.T) {
+	m := reviewTestModel(100, 40)
+
+	lines := strings.Join(m.buildConfigLines(), "\n")
+	for _, mon := range m.monitors {
+		want := mon.Name + ", " + layout.FormatMode(layout.CurrentMode(mon))
+		if !strings.Contains(lines, want) {
+			t.Fatalf("expected %q in the generated config:\n%s", want, lines)
+		}
+	}
+}
+
+// Changed and unchanged values must occupy the same width, so highlighting a
+// pending change never shifts the columns. (Colour itself is stripped in tests,
+// which have no terminal profile, so only the layout is asserted here.)
+func TestPendingValuePadsToAStableWidth(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		if got := lipgloss.Width(pendingValue("2560x1440@165", 16, changed)); got != 16 {
+			t.Fatalf("changed=%v: expected width 16, got %d", changed, got)
+		}
+	}
+	if got := lipgloss.Width(pendingValue("a-very-long-value-past-the-column", 4, false)); got != 33 {
+		t.Fatalf("expected an over-long value to keep its own width, got %d", got)
 	}
 }
 

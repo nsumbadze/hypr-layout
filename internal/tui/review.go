@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/nsumbadze/hypr-layout/internal/hypr"
 	"github.com/nsumbadze/hypr-layout/internal/layout"
 	"github.com/nsumbadze/hypr-layout/internal/ui"
 )
@@ -246,15 +247,17 @@ func (m tuiModel) reviewRowLine(row reviewRow, selected bool, nameW int) string 
 	switch row.kind {
 	case reviewRowMonitor:
 		cfg := m.activeConfigs[row.idx]
-		label = m.monitors[cfg.Index].Name
-		value = fmt.Sprintf("%-16s  %-14s  %s",
-			layout.FormatMode(cfg.Mode), transformLabel(cfg.Transform), vrrLabel(cfg.VRR))
+		mon := m.monitors[cfg.Index]
+		label = mon.Name
+		value = pendingValue(layout.FormatMode(cfg.Mode), 16, cfg.Mode != layout.CurrentMode(mon)) +
+			"  " + pendingValue(transformLabel(cfg.Transform), 14, cfg.Transform != mon.Transform) +
+			"  " + pendingValue(vrrLabel(cfg.VRR), 0, cfg.VRR != currentVRR(mon))
 	case reviewRowDirection:
 		label = "Direction"
-		value = directionLabel(m.direction)
+		value = ui.Dimmed.Render(directionLabel(m.direction))
 	case reviewRowOrder:
 		label = "Order"
-		value = m.orderSummary()
+		value = ui.Dimmed.Render(m.orderSummary())
 	}
 
 	marker := "  "
@@ -263,8 +266,28 @@ func (m tuiModel) reviewRowLine(row reviewRow, selected bool, nameW int) string 
 		marker = ui.Accent.Render("▸ ")
 		labelStyle = ui.Selected
 	}
-	return "  " + marker + labelStyle.Render(fmt.Sprintf("%-*s", nameW, label)) +
-		"  " + ui.Dimmed.Render(value) + "\n"
+	return "  " + marker + labelStyle.Render(fmt.Sprintf("%-*s", nameW, label)) + "  " + value + "\n"
+}
+
+// currentVRR maps a monitor's VRR flag onto the 0/1/2 config value.
+func currentVRR(mon hypr.Monitor) int {
+	if mon.VRR {
+		return 1
+	}
+	return 0
+}
+
+// pendingValue renders one setting, padded to width and highlighted when it
+// differs from what the monitor is running now. The hub opens with everything
+// at its current value, so a highlight is exactly the set of pending changes.
+func pendingValue(text string, width int, changed bool) string {
+	if n := width - lipgloss.Width(text); n > 0 {
+		text += strings.Repeat(" ", n)
+	}
+	if changed {
+		return ui.Accent.Render(text)
+	}
+	return ui.Dimmed.Render(text)
 }
 
 // orderSummary describes the current monitor order as a single line.

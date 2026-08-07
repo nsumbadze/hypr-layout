@@ -17,7 +17,7 @@ It reads your monitors from `hyprctl`, drops you on a single review screen with 
 - Monitor detection straight from `hyprctl monitors -j`
 - Layout presets: laptop only, external only, dual, triple, mirror
 - Per-monitor mode selection, with `preferred` / `highres` / `highrr` shortcuts
-- Sensible defaults everywhere, so a layout can be applied without opening a single editor
+- Opens on your current settings, with pending changes highlighted
 - Rotation (transform) and VRR per monitor — 90°/270° rotations are accounted for in positioning
 - Stack monitors in any of the four directions, in any order
 - Live proportional preview on every screen
@@ -59,9 +59,10 @@ Run `hypr-layout` with no arguments. Pick a layout, and you land on the review s
     Order      DP-1 → HDMI-A-2
 ```
 
-Every row already holds a sensible default — highest refresh rate, the monitor's
-current rotation and VRR, left-to-right order — so you can apply straight away
-and only open an editor for what you actually want to change.
+Every row starts at what the monitor is running right now — its current mode,
+rotation and VRR — so the screen reads as your current setup, not a proposed
+new one. Change only what you want; anything that would differ from the current
+setting is highlighted, so the highlights are exactly your pending changes.
 
 | Key | Action |
 | --- | --- |

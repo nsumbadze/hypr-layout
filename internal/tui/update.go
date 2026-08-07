@@ -135,18 +135,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ── state update helpers ──────────────────────────────────────────────────────
 
-// defaultModeSelections picks each active monitor's starting mode: the highest
-// refresh rate available, matching the `quick` command's default. Every
-// setting on the review hub starts from a default like this, so nothing has to
-// be chosen before the layout can be applied.
-func defaultModeSelections(monitors []hypr.Monitor, activeIndexes []int) map[int]layout.Mode {
-	modes := make(map[int]layout.Mode, len(activeIndexes))
-	for _, idx := range activeIndexes {
-		modes[idx] = layout.ResolveStrategy(monitors[idx], layout.StrategyHighrr)
-	}
-	return modes
-}
-
 func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, tuiKeys.Enter) {
 		item, ok := m.list.SelectedItem().(layoutListItem)
@@ -165,7 +153,10 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeIndexes = indexes
 		m.mirrored = item.opt.ID == layout.Mirror
 		m.direction = layout.LeftToRight
-		m.activeConfigs = layout.BuildConfigs(m.monitors, indexes, defaultModeSelections(m.monitors, indexes))
+		// nil modes means every setting starts at what the monitor is running
+		// now, so the hub opens showing the current setup rather than a
+		// proposed new one.
+		m.activeConfigs = layout.BuildConfigs(m.monitors, indexes, nil)
 		m.reviewCursor = 0
 		m.state = tuiReview
 		m = m.resizeComponents()
