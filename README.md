@@ -30,7 +30,7 @@ It reads your monitors from `hyprctl`, drops you on a single review screen with 
 Needs Go 1.26+ and a running Hyprland session.
 
 ```bash
-go install github.com/nsumbadze/hypr-layout@latest
+go install github.com/nsumbadze/hypr-layout/cmd/hypr-layout@latest
 ```
 
 Or build from source:
@@ -38,7 +38,7 @@ Or build from source:
 ```bash
 git clone https://github.com/nsumbadze/hypr-layout.git
 cd hypr-layout
-go build .
+make build
 ```
 
 Make sure your Hyprland config sources the file this tool writes:
@@ -136,10 +136,29 @@ Before writing, the existing `monitors.conf` is copied to `monitors.conf.backup-
 ## Development
 
 ```bash
+make build   # build ./cmd/hypr-layout
+make run     # run it
 make check   # fmt + vet + tests
 ```
 
 Standard library plus the Charm stack (Bubble Tea, Lip Gloss) for the TUI. PRs welcome — keep changes small and covered by tests.
+
+### Layout
+
+```
+cmd/hypr-layout      entry point
+internal/hypr        hyprctl: monitor detection and reload
+internal/layout      layout presets, modes, positioning
+internal/monconf     writing monitors.conf, backup and rollback
+internal/profile     saved profiles and import/export bundles
+internal/cli         subcommands and non-interactive output
+internal/tui         the wizard
+internal/ui          shared styles and text helpers
+```
+
+`internal/layout` is where the real logic lives: it turns a set of monitors and
+choices into config lines, and has no idea whether it was driven by the TUI or
+by `quick`. Both front ends go through it, so they cannot drift.
 
 ## License
 
