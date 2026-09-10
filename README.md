@@ -1,6 +1,6 @@
 # hypr-layout
 
-A TUI for managing Hyprland monitor layouts, so I don't have to hand-edit `~/.config/hypr/monitors.conf` every time I plug something in.
+A TUI for managing Hyprland monitor layouts, so I don't have to hand-edit `~/.config/hypr/monitors.lua` (or `monitors.conf` on older setups) every time I plug something in.
 
 It reads your monitors from `hyprctl`, drops you on a single review screen with every setting already filled in, and lets you change only what you care about with a live preview of the arrangement. Applying writes the config safely — your old file gets backed up, and if the reload fails it rolls back automatically.
 
@@ -17,11 +17,12 @@ It reads your monitors from `hyprctl`, drops you on a single review screen with 
 - Monitor detection straight from `hyprctl monitors -j`
 - Layout presets: laptop only, external only, dual, triple, mirror
 - Per-monitor mode selection, with `preferred` / `highres` / `highrr` shortcuts
-- Opens on your current settings, with pending changes highlighted
+- Opens on your current settings, including the arrangement, with pending changes highlighted
 - One flat settings list — `enter` changes whatever is highlighted, and that is the only editing key
 - Rotation (transform) and VRR per monitor — 90°/270° rotations are accounted for in positioning
 - Stack monitors in any of the four directions, in any order
 - Live proportional preview on every screen
+- Writes Hyprland's Lua config (0.55+, Omarchy Quattro) or the classic `monitors.conf`, whichever your setup reads
 - Timestamped backups and automatic rollback if `hyprctl reload` fails
 - Named profiles you can apply later, plus export/import of all profiles as one JSON file
 - `quick` presets for scripts — fully non-interactive with `--yes`
@@ -42,7 +43,16 @@ cd hypr-layout
 make build
 ```
 
-Make sure your Hyprland config sources the file this tool writes:
+The tool writes to whichever file your Hyprland reads. With the Lua config
+(Hyprland 0.55+, the Omarchy Quattro default) that is `~/.config/hypr/monitors.lua`,
+which `hyprland.lua` already loads:
+
+```lua
+require("hypr.monitors")
+```
+
+Without a `hyprland.lua` it writes the classic `~/.config/hypr/monitors.conf`,
+which your `hyprland.conf` needs to source:
 
 ```ini
 source = ~/.config/hypr/monitors.conf
@@ -73,8 +83,9 @@ screen — one flat list where every row is a single named setting:
     Show config
 ```
 
-Every row starts at what the monitor is running right now, so the screen reads
-as your current setup rather than a proposed new one. Anything you change is
+Every row starts at what the monitor is running right now, and the direction
+and order are read from where the monitors sit, so the screen reads as your
+current setup rather than a proposed new one. Anything you change is
 highlighted, so the highlights are exactly your pending changes. A live preview
 of the arrangement sits below the list and updates as you go.
 
@@ -94,8 +105,8 @@ runs the two `Actions` rows. `esc` goes back from anywhere.
 On the reorder screen, `shift`+`↑`/`↓` moves the highlighted monitor and the
 preview follows along; `enter` keeps the new order and `esc` discards it.
 
-Nothing is written until you press `a`. The previous `monitors.conf` is backed
-up first, and a failed reload rolls back automatically.
+Nothing is written until you press `a`. The previous config file is backed up
+first, and a failed reload rolls back automatically.
 
 ### Quick presets
 
@@ -133,13 +144,26 @@ hypr-layout export profiles.json    # bundle all profiles into one file
 hypr-layout import profiles.json    # restore them (--force to overwrite)
 ```
 
-Profiles live in `~/.config/hypr-layout/profiles/` as plain config files with a small comment header (direction, monitors, save date), so they're readable and diffable.
+Profiles live in `~/.config/hypr-layout/profiles/` as plain config files with a small comment header (direction, monitors, save date), so they're readable and diffable. They are always stored in the classic `monitor = ...` syntax and translated to Lua on apply when that is what Hyprland reads, so a profile works the same before and after a config migration.
 
 ## How it works
 
 Positions are computed from the modes you pick, not from the current state — left-to-right stacks each monitor after the previous one's width, vertical layouts do the same with heights, and rotated monitors swap their dimensions. Mirror layouts use Hyprland's `mirror` keyword with the focused monitor as the source. Anything not part of the layout gets an explicit `disable` line.
 
-A generated config looks like this:
+A generated `monitors.lua` looks like this:
+
+```lua
+-- Written by hypr-layout. Rerun it to change the layout.
+
+hl.env("GDK_SCALE", "2")
+
+hl.monitor({ output = "DP-1", mode = "2560x1440@165", position = "0x0", scale = 1 })
+hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@60", position = "2560x0", scale = 1, transform = 1 })
+hl.monitor({ output = "eDP-1", disabled = true })
+```
+
+Any `hl.env(...)` lines in the previous file are carried over, so Omarchy's
+`GDK_SCALE` setting survives. The same layout in classic syntax:
 
 ```ini
 monitor = DP-1, 2560x1440@165, 0x0, 1
@@ -147,7 +171,7 @@ monitor = HDMI-A-1, 1920x1080@60, 2560x0, 1, transform, 1
 monitor = eDP-1, disable
 ```
 
-Before writing, the existing `monitors.conf` is copied to `monitors.conf.backup-YYYYMMDD-HHMMSS`. If the reload fails, the backup is restored (or the new file removed if there was nothing before).
+Before writing, the existing file is copied to `monitors.lua.backup-YYYYMMDD-HHMMSS` (or the `monitors.conf` equivalent). If the reload fails, the backup is restored (or the new file removed if there was nothing before).
 
 ## Development
 
@@ -165,7 +189,7 @@ Standard library plus the Charm stack (Bubble Tea, Lip Gloss) for the TUI. PRs w
 cmd/hypr-layout      entry point
 internal/hypr        hyprctl: monitor detection and reload
 internal/layout      layout presets, modes, positioning
-internal/monconf     writing monitors.conf, backup and rollback
+internal/monconf     writing monitors.lua / monitors.conf, backup and rollback
 internal/profile     saved profiles and import/export bundles
 internal/cli         subcommands and non-interactive output
 internal/tui         the wizard
