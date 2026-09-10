@@ -225,6 +225,27 @@ func (m tuiModel) buildConfigLines() []string {
 	return layout.Lines(m.buildRules(), m.target.Format)
 }
 
+// currentArrangement is the order and direction the monitors have now, which
+// is what the layout rows are compared against to show pending changes.
+func (m tuiModel) currentArrangement() ([]int, layout.Direction) {
+	return layout.CurrentArrangement(m.monitors, m.activeIndexes)
+}
+
+// orderChanged reports whether the active monitors are no longer in the
+// order they sit in now.
+func (m tuiModel) orderChanged() bool {
+	current, _ := m.currentArrangement()
+	if len(current) != len(m.activeConfigs) {
+		return true
+	}
+	for i, cfg := range m.activeConfigs {
+		if cfg.Index != current[i] {
+			return true
+		}
+	}
+	return false
+}
+
 var transformLabels = []string{
 	"Normal",
 	"90°",
@@ -352,9 +373,10 @@ func (m tuiModel) reviewRowContent(row reviewRow) (string, string) {
 		mon := m.monitors[cfg.Index]
 		return "VRR", pendingValue(vrrLabel(cfg.VRR), 0, cfg.VRR != currentVRR(mon))
 	case reviewRowDirection:
-		return "Direction", ui.Dimmed.Render(directionLabel(m.direction))
+		_, current := m.currentArrangement()
+		return "Direction", pendingValue(directionLabel(m.direction), 0, m.direction != current)
 	case reviewRowOrder:
-		return "Order", ui.Dimmed.Render(m.orderSummary())
+		return "Order", pendingValue(m.orderSummary(), 0, m.orderChanged())
 	case reviewRowSaveProfile:
 		return "Save as profile", ""
 	case reviewRowShowConfig:

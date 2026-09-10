@@ -148,11 +148,12 @@ func (m tuiModel) updateLayoutSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.activeIndexes = indexes
 		m.mirrored = item.opt.ID == layout.Mirror
-		m.direction = layout.LeftToRight
-		// nil modes means every setting starts at what the monitor is running
-		// now, so the hub opens showing the current setup rather than a
-		// proposed new one.
-		m.activeConfigs = layout.BuildConfigs(m.monitors, indexes, nil)
+		// Order and direction come from where the monitors sit now, and nil
+		// modes means every setting starts at what the monitor is running, so
+		// the hub opens showing the current setup rather than a proposed one.
+		order, direction := layout.CurrentArrangement(m.monitors, indexes)
+		m.direction = direction
+		m.activeConfigs = layout.BuildConfigs(m.monitors, order, nil)
 		m.reviewCursor = firstSelectableRow(m.reviewRows())
 		m.state = tuiReview
 		m = m.resizeComponents()

@@ -561,6 +561,46 @@ func TestReviewWindowKeepsCursorVisible(t *testing.T) {
 	}
 }
 
+// The hub must open on the arrangement the monitors have now, not on
+// detection order, or a reorder that matches reality looks like a change and
+// applying reproduces the same layout the user tried to swap.
+func TestLayoutSelectionOpensOnCurrentArrangement(t *testing.T) {
+	m := wizardTestModel(100, 40)
+	m.monitors[0].X = 2560 // DP-1 sits to the right of HDMI-A-2
+	m.state = tuiLayoutSelect
+	m.list = m.makeLayoutList()
+	m.list.Select(2) // Dual horizontal
+
+	next, _ := m.updateLayoutSelect(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(tuiModel)
+
+	if got.direction != layout.LeftToRight {
+		t.Fatalf("expected left→right, got %q", got.direction)
+	}
+	if got.activeConfigs[0].Index != 1 || got.activeConfigs[1].Index != 0 {
+		t.Fatalf("expected HDMI-A-2 first, got %v", got.activeConfigs)
+	}
+	if got.orderChanged() {
+		t.Fatal("freshly opened hub must not show the order as pending")
+	}
+
+	lines := strings.Join(got.buildConfigLines(), "\n")
+	if !strings.Contains(lines, "HDMI-A-2, 2560x1440@144, 0x0") || !strings.Contains(lines, "DP-1, 2560x1440@165, 2560x0") {
+		t.Fatalf("expected the current positions to be regenerated:\n%s", lines)
+	}
+}
+
+func TestReorderingMarksOrderAsPending(t *testing.T) {
+	m := reviewTestModel(100, 40)
+	if m.orderChanged() {
+		t.Fatal("unchanged order reported as pending")
+	}
+	m.activeConfigs[0], m.activeConfigs[1] = m.activeConfigs[1], m.activeConfigs[0]
+	if !m.orderChanged() {
+		t.Fatal("swapped order not reported as pending")
+	}
+}
+
 // The config view and apply must use the syntax of the file Hyprland reads.
 func TestConfigLinesFollowTargetFormat(t *testing.T) {
 	m := reviewTestModel(100, 40)

@@ -267,9 +267,10 @@ func (m tuiModel) layoutSelectView(h int) string {
 		if err != nil {
 			body = strings.TrimRight(body, "\n") + "\n\n  " + ui.Dimmed.Render("Not available: "+err.Error())
 		} else {
-			configs := layout.BuildConfigs(m.monitors, indexes, nil)
+			order, direction := layout.CurrentArrangement(m.monitors, indexes)
+			configs := layout.BuildConfigs(m.monitors, order, nil)
 			mirrored := item.opt.ID == layout.Mirror
-			body = m.appendPreviewSection(body, configs, layout.LeftToRight, mirrored, m.mirrorSource(indexes))
+			body = m.appendPreviewSection(body, configs, direction, mirrored, m.mirrorSource(indexes))
 		}
 	}
 
