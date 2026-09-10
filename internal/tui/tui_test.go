@@ -9,6 +9,7 @@ import (
 
 	"github.com/nsumbadze/hypr-layout/internal/hypr"
 	"github.com/nsumbadze/hypr-layout/internal/layout"
+	"github.com/nsumbadze/hypr-layout/internal/monconf"
 )
 
 func wizardTestModel(w, h int) tuiModel {
@@ -20,6 +21,7 @@ func wizardTestModel(w, h int) tuiModel {
 		{Name: "HDMI-A-2", Width: 2560, Height: 1440, RefreshRate: 144, Scale: 1,
 			AvailableModes: []string{"2560x1440@144.00Hz", "1920x1080@60.00Hz"}},
 	}
+	m.target = monconf.Target{Path: "/tmp/monitors.conf", Format: layout.FormatConf}
 	m.activeIndexes = []int{0, 1}
 	m.direction = layout.LeftToRight
 	m.activeConfigs = layout.BuildConfigs(m.monitors, m.activeIndexes, nil)
@@ -74,7 +76,7 @@ func wizardScreens(w, h int) map[string]tuiModel {
 
 	config := wizardTestModel(w, h)
 	config.state = tuiConfigView
-	config.configLines = layout.PositionedLines(config.monitors, config.activeConfigs, layout.LeftToRight)
+	config.configLines = layout.ConfLines(layout.PositionedRules(config.monitors, config.activeConfigs, layout.LeftToRight))
 	config = config.resizeComponents()
 	config.viewport.SetContent(strings.Join(config.configLines, "\n"))
 	screens["config-view"] = config
@@ -556,5 +558,16 @@ func TestReviewWindowKeepsCursorVisible(t *testing.T) {
 		if i < first || i >= last {
 			t.Fatalf("cursor %d outside drawn window [%d,%d)", i, first, last)
 		}
+	}
+}
+
+// The config view and apply must use the syntax of the file Hyprland reads.
+func TestConfigLinesFollowTargetFormat(t *testing.T) {
+	m := reviewTestModel(100, 40)
+	m.target.Format = layout.FormatLua
+
+	lines := m.buildConfigLines()
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], `hl.monitor({ output = "DP-1"`) {
+		t.Fatalf("expected lua rules, got %#v", lines)
 	}
 }

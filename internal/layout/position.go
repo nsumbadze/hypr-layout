@@ -38,19 +38,6 @@ func EffectiveSize(mode Mode, transform int) (int, int) {
 	return mode.Width, mode.Height
 }
 
-// appendKeywordPairs adds non-default transform and vrr keyword pairs to a
-// generated monitor line.
-func appendKeywordPairs(line string, config MonitorConfig) string {
-	if config.Transform != 0 {
-		line += fmt.Sprintf(", transform, %d", config.Transform)
-	}
-	if config.VRR != 0 {
-		line += fmt.Sprintf(", vrr, %d", config.VRR)
-	}
-
-	return line
-}
-
 // parseDirectionName parses the flag-facing direction names used by
 // `quick --direction`.
 func ParseDirection(value string) (Direction, error) {
@@ -126,8 +113,8 @@ func BuildConfigs(monitors []hypr.Monitor, activeIndexes []int, selectedModes ma
 	return configs
 }
 
-// PositionedLines generates monitor config lines for the ordered
-// active monitors followed by disabled monitors.
+// PositionedRules generates monitor rules for the ordered active monitors
+// followed by disabled rules for every other monitor.
 //
 // Coordinate rules (Hyprland: Y increases downward):
 //
@@ -135,8 +122,8 @@ func BuildConfigs(monitors []hypr.Monitor, activeIndexes []int, selectedModes ma
 //	right-to-left : each monitor shifts left by its own width (produces negative X).
 //	top-to-bottom : each monitor shifts down by the previous monitor's height.
 //	bottom-to-top : each monitor shifts up by its own height (produces negative Y).
-func PositionedLines(monitors []hypr.Monitor, activeConfigs []MonitorConfig, direction Direction) []string {
-	lines := make([]string, 0, len(monitors))
+func PositionedRules(monitors []hypr.Monitor, activeConfigs []MonitorConfig, direction Direction) []Rule {
+	rules := make([]Rule, 0, len(monitors))
 	activeSet := make(map[int]struct{}, len(activeConfigs))
 	positionX := 0
 	positionY := 0
@@ -158,15 +145,7 @@ func PositionedLines(monitors []hypr.Monitor, activeConfigs []MonitorConfig, dir
 			}
 		}
 
-		line := fmt.Sprintf(
-			"monitor = %s, %s, %dx%d, %s",
-			mon.Name,
-			FormatMode(config.Mode),
-			positionX,
-			positionY,
-			ui.FormatFloat(mon.Scale),
-		)
-		lines = append(lines, appendKeywordPairs(line, config))
+		rules = append(rules, activeRule(mon, config, positionX, positionY))
 
 		switch direction {
 		case LeftToRight:
@@ -176,63 +155,55 @@ func PositionedLines(monitors []hypr.Monitor, activeConfigs []MonitorConfig, dir
 		}
 	}
 
-	for idx, mon := range monitors {
-		if _, ok := activeSet[idx]; ok {
-			continue
-		}
-
-		lines = append(lines, fmt.Sprintf("monitor = %s, disable", mon.Name))
-	}
-
-	return lines
+	return append(rules, disabledRules(monitors, activeSet)...)
 }
 
-// renderMirroredConfigLines generates config lines where every active monitor
-// mirrors the source monitor. The source is emitted first at 0x0; mirrors use
-// Hyprland's `mirror, <source>` keyword. Position is irrelevant for mirrors,
-// so 0x0 is used throughout. Inactive monitors are disabled as usual.
-func MirroredLines(monitors []hypr.Monitor, activeConfigs []MonitorConfig, sourceIdx int) []string {
-	lines := make([]string, 0, len(monitors))
+// MirroredRules generates rules where every active monitor mirrors the
+// source monitor. The source comes first at 0x0; position is irrelevant for
+// mirrors, so 0x0 is used throughout. Inactive monitors are disabled as usual.
+func MirroredRules(monitors []hypr.Monitor, activeConfigs []MonitorConfig, sourceIdx int) []Rule {
+	rules := make([]Rule, 0, len(monitors))
 	activeSet := make(map[int]struct{}, len(activeConfigs))
 	sourceName := monitors[sourceIdx].Name
 
 	for _, config := range activeConfigs {
 		activeSet[config.Index] = struct{}{}
-		if config.Index != sourceIdx {
-			continue
+		if config.Index == sourceIdx {
+			rules = append(rules, activeRule(monitors[config.Index], config, 0, 0))
 		}
-
-		line := fmt.Sprintf(
-			"monitor = %s, %s, 0x0, %s",
-			sourceName,
-			FormatMode(config.Mode),
-			ui.FormatFloat(monitors[config.Index].Scale),
-		)
-		lines = append(lines, appendKeywordPairs(line, config))
 	}
 
 	for _, config := range activeConfigs {
 		if config.Index == sourceIdx {
 			continue
 		}
-
-		line := fmt.Sprintf(
-			"monitor = %s, %s, 0x0, %s, mirror, %s",
-			monitors[config.Index].Name,
-			FormatMode(config.Mode),
-			ui.FormatFloat(monitors[config.Index].Scale),
-			sourceName,
-		)
-		lines = append(lines, appendKeywordPairs(line, config))
+		rule := activeRule(monitors[config.Index], config, 0, 0)
+		rule.Mirror = sourceName
+		rules = append(rules, rule)
 	}
 
+	return append(rules, disabledRules(monitors, activeSet)...)
+}
+
+func activeRule(mon hypr.Monitor, config MonitorConfig, x, y int) Rule {
+	return Rule{
+		Output:    mon.Name,
+		Mode:      FormatMode(config.Mode),
+		Position:  fmt.Sprintf("%dx%d", x, y),
+		Scale:     ui.FormatFloat(mon.Scale),
+		Transform: config.Transform,
+		VRR:       config.VRR,
+	}
+}
+
+func disabledRules(monitors []hypr.Monitor, activeSet map[int]struct{}) []Rule {
+	var rules []Rule
 	for idx, mon := range monitors {
 		if _, ok := activeSet[idx]; ok {
 			continue
 		}
-
-		lines = append(lines, fmt.Sprintf("monitor = %s, disable", mon.Name))
+		rules = append(rules, Rule{Output: mon.Name, Disabled: true})
 	}
 
-	return lines
+	return rules
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/nsumbadze/hypr-layout/internal/layout"
 	"github.com/nsumbadze/hypr-layout/internal/profile"
 	"github.com/nsumbadze/hypr-layout/internal/ui"
 )
@@ -99,6 +100,9 @@ func runApplyProfile(profileName string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("could not load profile %q: %w", profileName, err)
 	}
-	fmt.Print(renderPreview("Profile: "+profileName, lines))
-	return applyPreviewFlow(lines, options)
+	rules, err := layout.ParseConfLines(lines)
+	if err != nil {
+		return fmt.Errorf("could not read profile %q: %w", profileName, err)
+	}
+	return applyPreviewFlow("Profile: "+profileName, rules, options)
 }

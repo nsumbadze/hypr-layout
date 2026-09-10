@@ -52,6 +52,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.monitors = msg.monitors
+		m.target = msg.target
 		m.state = tuiLayoutSelect
 		m.list = m.makeLayoutList()
 		return m, nil
@@ -171,14 +172,11 @@ func (m tuiModel) startApply() (tea.Model, tea.Cmd) {
 	m.configLines = m.buildConfigLines()
 	m.state = tuiApplying
 	lines := m.configLines
+	target := m.target
 	return m, tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
-			path, err := monconf.DefaultPath()
-			if err != nil {
-				return configWrittenMsg{err: err}
-			}
-			result, err := monconf.Apply(path, lines, time.Now())
+			result, err := monconf.Apply(target, lines, time.Now())
 			return configWrittenMsg{result: result, err: err}
 		},
 	)

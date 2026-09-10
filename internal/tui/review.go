@@ -212,12 +212,17 @@ func (m tuiModel) backToReview() tuiModel {
 	return m
 }
 
-// buildConfigLines renders the config for the current review state.
-func (m tuiModel) buildConfigLines() []string {
+// buildRules turns the current review state into monitor rules.
+func (m tuiModel) buildRules() []layout.Rule {
 	if m.mirrored {
-		return layout.MirroredLines(m.monitors, m.activeConfigs, layout.MirrorSourceIndex(m.monitors, m.activeIndexes))
+		return layout.MirroredRules(m.monitors, m.activeConfigs, layout.MirrorSourceIndex(m.monitors, m.activeIndexes))
 	}
-	return layout.PositionedLines(m.monitors, m.activeConfigs, m.direction)
+	return layout.PositionedRules(m.monitors, m.activeConfigs, m.direction)
+}
+
+// buildConfigLines renders the rules in the syntax of the file being written.
+func (m tuiModel) buildConfigLines() []string {
+	return layout.Lines(m.buildRules(), m.target.Format)
 }
 
 var transformLabels = []string{

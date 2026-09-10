@@ -56,6 +56,7 @@ func isEditorState(s tuiState) bool {
 
 type monDetectedMsg struct {
 	monitors []hypr.Monitor
+	target   monconf.Target
 	err      error
 }
 
@@ -155,6 +156,9 @@ type tuiModel struct {
 	height int
 
 	// pipeline data
+	// target is the file the layout will be written to; the config view and
+	// apply both use its format.
+	target        monconf.Target
 	monitors      []hypr.Monitor
 	activeIndexes []int
 	direction     layout.Direction
@@ -208,7 +212,11 @@ func (m tuiModel) Init() tea.Cmd {
 		m.spinner.Tick,
 		func() tea.Msg {
 			monitors, err := hypr.Detect()
-			return monDetectedMsg{monitors: monitors, err: err}
+			if err != nil {
+				return monDetectedMsg{err: err}
+			}
+			target, err := monconf.DetectTarget()
+			return monDetectedMsg{monitors: monitors, target: target, err: err}
 		},
 	)
 }
