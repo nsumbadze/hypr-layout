@@ -7,7 +7,7 @@ import (
 	"github.com/nsumbadze/hypr-layout/internal/hypr"
 )
 
-// ── PositionedLines ───────────────────────────────────────────────────────────
+// ── PositionedRules ───────────────────────────────────────────────────────────
 
 func TestRenderPositionedConfigLinesLeftToRight(t *testing.T) {
 	monitors := []hypr.Monitor{
@@ -20,7 +20,7 @@ func TestRenderPositionedConfigLinesLeftToRight(t *testing.T) {
 		{Index: 2, Mode: Mode{Width: 1920, Height: 1080, RefreshRate: 60}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, LeftToRight)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, LeftToRight))
 	want := []string{
 		"monitor = DP-1, 2560x1440@165, 0x0, 1",
 		"monitor = HDMI-A-1, 1920x1080@60, 2560x0, 1",
@@ -44,7 +44,7 @@ func TestRenderPositionedConfigLinesRightToLeft(t *testing.T) {
 		{Index: 2, Mode: Mode{Width: 1920, Height: 1080, RefreshRate: 60}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, RightToLeft)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, RightToLeft))
 	want := []string{
 		"monitor = DP-1, 2560x1440@165, 0x0, 1",
 		"monitor = HDMI-A-1, 1920x1080@60, -1920x0, 1",
@@ -69,7 +69,7 @@ func TestRenderPositionedConfigLinesRightToLeftThreeMonitors(t *testing.T) {
 		{Index: 2, Mode: Mode{Width: 2560, Height: 1440, RefreshRate: 144}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, RightToLeft)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, RightToLeft))
 	want := []string{
 		"monitor = A, 2560x1440@165, 0x0, 1",
 		"monitor = B, 1920x1080@60, -1920x0, 1",
@@ -92,7 +92,7 @@ func TestRenderPositionedConfigLinesTopToBottom(t *testing.T) {
 		{Index: 1, Mode: Mode{Width: 2560, Height: 1440, RefreshRate: 165}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, TopToBottom)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, TopToBottom))
 	want := []string{
 		"monitor = HDMI-A-1, 1920x1080@60, 0x0, 1",
 		"monitor = DP-1, 2560x1440@165, 0x1080, 1",
@@ -116,7 +116,7 @@ func TestRenderPositionedConfigLinesBottomToTop(t *testing.T) {
 		{Index: 1, Mode: Mode{Width: 2560, Height: 1440, RefreshRate: 165}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, BottomToTop)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, BottomToTop))
 	want := []string{
 		"monitor = HDMI-A-1, 1920x1080@60, 0x0, 1",
 		"monitor = DP-1, 2560x1440@165, 0x-1440, 1",
@@ -141,7 +141,7 @@ func TestRenderPositionedConfigLinesBottomToTopThreeMonitors(t *testing.T) {
 		{Index: 2, Mode: Mode{Width: 2560, Height: 1440, RefreshRate: 144}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, BottomToTop)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, BottomToTop))
 	want := []string{
 		"monitor = A, 2560x1440@165, 0x0, 1",
 		"monitor = B, 1920x1080@60, 0x-1080, 1",
@@ -165,7 +165,7 @@ func TestRenderPositionedConfigLinesEmitsTransformAndVRR(t *testing.T) {
 		{Index: 1, Mode: Mode{Width: 1920, Height: 1080, RefreshRate: 60}},
 	}
 
-	got := PositionedLines(monitors, activeConfigs, LeftToRight)
+	got := ConfLines(PositionedRules(monitors, activeConfigs, LeftToRight))
 	want := []string{
 		"monitor = DP-1, 2560x1440@165, 0x0, 1, transform, 1, vrr, 1",
 		"monitor = DP-2, 1920x1080@60, 1440x0, 1",
@@ -218,7 +218,7 @@ func TestRenderMirroredConfigLines(t *testing.T) {
 		{Index: 1, Mode: Mode{Width: 2560, Height: 1440, RefreshRate: 165}},
 	}
 
-	got := MirroredLines(monitors, activeConfigs, 1)
+	got := ConfLines(MirroredRules(monitors, activeConfigs, 1))
 	want := []string{
 		"monitor = DP-1, 2560x1440@165, 0x0, 1",
 		"monitor = eDP-1, 2880x1800@120, 0x0, 1.5, mirror, DP-1",

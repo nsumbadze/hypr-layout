@@ -212,12 +212,38 @@ func (m tuiModel) backToReview() tuiModel {
 	return m
 }
 
-// buildConfigLines renders the config for the current review state.
-func (m tuiModel) buildConfigLines() []string {
+// buildRules turns the current review state into monitor rules.
+func (m tuiModel) buildRules() []layout.Rule {
 	if m.mirrored {
-		return layout.MirroredLines(m.monitors, m.activeConfigs, layout.MirrorSourceIndex(m.monitors, m.activeIndexes))
+		return layout.MirroredRules(m.monitors, m.activeConfigs, layout.MirrorSourceIndex(m.monitors, m.activeIndexes))
 	}
-	return layout.PositionedLines(m.monitors, m.activeConfigs, m.direction)
+	return layout.PositionedRules(m.monitors, m.activeConfigs, m.direction)
+}
+
+// buildConfigLines renders the rules in the syntax of the file being written.
+func (m tuiModel) buildConfigLines() []string {
+	return layout.Lines(m.buildRules(), m.target.Format)
+}
+
+// currentArrangement is the order and direction the monitors have now, which
+// is what the layout rows are compared against to show pending changes.
+func (m tuiModel) currentArrangement() ([]int, layout.Direction) {
+	return layout.CurrentArrangement(m.monitors, m.activeIndexes)
+}
+
+// orderChanged reports whether the active monitors are no longer in the
+// order they sit in now.
+func (m tuiModel) orderChanged() bool {
+	current, _ := m.currentArrangement()
+	if len(current) != len(m.activeConfigs) {
+		return true
+	}
+	for i, cfg := range m.activeConfigs {
+		if cfg.Index != current[i] {
+			return true
+		}
+	}
+	return false
 }
 
 var transformLabels = []string{
@@ -347,9 +373,10 @@ func (m tuiModel) reviewRowContent(row reviewRow) (string, string) {
 		mon := m.monitors[cfg.Index]
 		return "VRR", pendingValue(vrrLabel(cfg.VRR), 0, cfg.VRR != currentVRR(mon))
 	case reviewRowDirection:
-		return "Direction", ui.Dimmed.Render(directionLabel(m.direction))
+		_, current := m.currentArrangement()
+		return "Direction", pendingValue(directionLabel(m.direction), 0, m.direction != current)
 	case reviewRowOrder:
-		return "Order", ui.Dimmed.Render(m.orderSummary())
+		return "Order", pendingValue(m.orderSummary(), 0, m.orderChanged())
 	case reviewRowSaveProfile:
 		return "Save as profile", ""
 	case reviewRowShowConfig:

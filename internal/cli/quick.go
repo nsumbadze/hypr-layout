@@ -40,19 +40,26 @@ func runQuickPreset(preset string, args []string) error {
 			return fmt.Errorf("invalid --order: %w", err)
 		}
 	}
-	var lines []string
+	var rules []layout.Rule
 	if layoutID == layout.Mirror {
-		lines = layout.MirroredLines(monitors, activeConfigs, layout.MirrorSourceIndex(monitors, activeIndexes))
+		rules = layout.MirroredRules(monitors, activeConfigs, layout.MirrorSourceIndex(monitors, activeIndexes))
 	} else {
-		lines = layout.PositionedLines(monitors, activeConfigs, options.Direction)
+		rules = layout.PositionedRules(monitors, activeConfigs, options.Direction)
 	}
-	fmt.Print(renderPreview("Quick: "+preset, lines))
-	return applyPreviewFlow(lines, options.commandOptions)
+	return applyPreviewFlow("Quick: "+preset, rules, options.commandOptions)
 }
 
-func applyPreviewFlow(lines []string, options commandOptions) error {
+// applyPreviewFlow previews the rules in the syntax of the file Hyprland
+// reads, then writes them there and reloads.
+func applyPreviewFlow(title string, rules []layout.Rule, options commandOptions) error {
+	target, err := monconf.DetectTarget()
+	if err != nil {
+		return fmt.Errorf("could not determine monitor config path: %w", err)
+	}
+	lines := layout.Lines(rules, target.Format)
+	fmt.Print(renderPreview(title, lines))
 	if !options.AutoYes {
-		apply, err := promptApplyConfirmation(os.Stdin, os.Stdout)
+		apply, err := promptApplyConfirmation(os.Stdin, os.Stdout, target.Path)
 		if err != nil {
 			return fmt.Errorf("failed to read apply confirmation: %w", err)
 		}
@@ -61,11 +68,7 @@ func applyPreviewFlow(lines []string, options commandOptions) error {
 			return nil
 		}
 	}
-	configPath, err := monconf.DefaultPath()
-	if err != nil {
-		return fmt.Errorf("could not determine monitor config path: %w", err)
-	}
-	result, err := monconf.Apply(configPath, lines, time.Now())
+	result, err := monconf.Apply(target, lines, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to apply layout: %w", err)
 	}

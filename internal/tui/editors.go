@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -120,7 +121,9 @@ func (m tuiModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputErr = err.Error()
 			return m, nil
 		}
-		lines := m.buildConfigLines()
+		// Profiles are stored in the classic syntax whatever Hyprland reads,
+		// so they stay portable and are translated again when applied.
+		lines := layout.ConfLines(m.buildRules())
 		meta := m.profileMetadata()
 		return m, func() tea.Msg {
 			dir, err := profile.DefaultDir()
@@ -229,7 +232,7 @@ func (m tuiModel) orderEditView(h int) string {
 	return lipgloss.NewStyle().Height(h).Render(body)
 }
 
-// configView shows the exact lines that will be written to monitors.conf.
+// configView shows the exact lines that will be written to the config file.
 func (m tuiModel) configView(h int) string {
 	inner := m.viewport.View()
 	boxWidth := m.width - 6
@@ -239,7 +242,7 @@ func (m tuiModel) configView(h int) string {
 	box := ui.PreviewBox.Copy().Width(boxWidth).Render(inner)
 
 	var b strings.Builder
-	b.WriteString("\n  " + ui.Title.Render("Will be written to monitors.conf") + "\n\n")
+	b.WriteString("\n  " + ui.Title.Render("Will be written to "+filepath.Base(m.target.Path)) + "\n\n")
 	b.WriteString("  " + box + "\n")
 
 	body := m.appendPreviewSection(b.String(), m.activeConfigs, m.direction, m.mirrored, m.mirrorSource(m.activeIndexes))

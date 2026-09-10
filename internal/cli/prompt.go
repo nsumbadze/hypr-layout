@@ -36,8 +36,8 @@ func promptYesNo(r io.Reader, w io.Writer, prompt string) (bool, error) {
 	}
 }
 
-func promptApplyConfirmation(r io.Reader, w io.Writer) (bool, error) {
-	return promptYesNo(r, w, "\nApply this layout to ~/.config/hypr/monitors.conf? (y/n) ")
+func promptApplyConfirmation(r io.Reader, w io.Writer, configPath string) (bool, error) {
+	return promptYesNo(r, w, "\nApply this layout to "+configPath+"? (y/n) ")
 }
 
 func parseConfirmation(input string) (bool, error) {
